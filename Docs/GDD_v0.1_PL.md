@@ -1,7 +1,7 @@
 # MOURNEVEIL: THE ETERNAL REIGN — Mini GDD v0.1
 
 **Status:** Preprodukcja / pierwszy prototyp  
-**Zespół:** dwoje twórców  
+**Zespół:** Mariia Dorokhova i Szymon Drzazga
 **Silnik:** Unity, C#; 2D UI z ilustracyjnym tłem  
 **Platforma docelowa:** PC  
 **Wersja dokumentu:** 0.1, 17 listopada 2026
