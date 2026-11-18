@@ -1,14 +1,26 @@
+using System;
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 namespace Mourneveil
 {
+    [Serializable]
+    public class BloodVialUI
+    {
+        [Tooltip("UI Button representing this vial (Image on the Button can show the full bottle).")]
+        public Button button;
+
+        [Tooltip("Optional child object showing an empty/dimmed vial after drinking. Start inactive. Disable Raycast Target on its Image.")]
+        public GameObject emptyOverlay;
+    }
+
     /// <summary>
-    /// Mourneveil Prologue v0.2: an upgrade of v0.1, preserving all existing serialized fields.
-    /// The five story vials are intentionally separate from the Blood economy.
-    /// Attach to _Prologue in Crypt_Intro. No custom Editor scripts are required.
+    /// Prologue v0.3: five interactive blood vials, while retaining v0.2
+    /// intro fade, flashbacks, hunger, heartbeat, knocks and typewriter.
+    /// Attach to _Prologue in Crypt_Intro (not to each vial).
     /// </summary>
     public sealed class MourneveilPrologue : MonoBehaviour
     {
@@ -21,37 +33,45 @@ namespace Mourneveil
             Finished
         }
 
-        [Header("Intro UI — existing references from v0.1")]
+        [Header("Intro UI - existing v0.2 references")]
         [SerializeField] private GameObject introPanel;
         [SerializeField] private TMP_Text storyText;
         [SerializeField] private TMP_Text memoryText;
         [SerializeField] private TMP_Text vialsText;
+        [Tooltip("Old Drink button. Keep its reference for compatibility; it is hidden when Blood Vials are configured.")]
         [SerializeField] private Button drinkButton;
-        [Tooltip("Optional: up to five separate vial GameObjects, ordered left to right.")]
+        [Tooltip("Legacy decorative icons. Leave empty when using interactive Blood Vials.")]
         [SerializeField] private GameObject[] vialIcons;
 
-        [Header("Atmosphere — existing references from v0.1")]
-        [Tooltip("A fullscreen red Image with Raycast Target disabled.")]
+        [Header("v0.3 - Interactive Blood Vials")]
+        [Tooltip("Create 5 UI Buttons in VialsPanel and assign them here, in the desired order. With vials configured, their count replaces Starting Vials.")]
+        [SerializeField] private BloodVialUI[] bloodVials = new BloodVialUI[0];
+        [Tooltip("If true, only the next vial can be clicked. If false, the player can drink the 5 vials in any order.")]
+        [SerializeField] private bool requireSequentialVials = true;
+
+        [Header("Atmosphere - existing v0.2 references")]
         [SerializeField] private Image hungerOverlay;
         [SerializeField] private AudioSource soundSource;
         [SerializeField] private AudioClip drinkingSound;
         [SerializeField] private AudioClip knockingSound;
 
-        [Header("Friend dialogue — existing references from v0.1")]
+        [Header("Friend dialogue - existing v0.2 references")]
         [SerializeField] private GameObject friendPanel;
         [SerializeField] private TMP_Text friendDialogueText;
         [SerializeField] private Button nextDialogueButton;
 
-        [Header("End of current prototype — existing references from v0.1")]
+        [Header("End of current prototype - existing v0.2 references")]
         [SerializeField] private GameObject endPanel;
         [SerializeField] private TMP_Text endText;
 
-        [Header("Timing and content — existing references from v0.1")]
+        [Header("Timing and content - existing v0.2 references")]
+        [Tooltip("Used only if Blood Vials are not configured (old Drink button fallback).")]
         [SerializeField, Min(1)] private int startingVials = 5;
         [SerializeField, Min(0.5f)] private float hungerSeconds = 4f;
         [SerializeField, Min(0.2f)] private float pauseBetweenKnocks = 0.8f;
 
-        [SerializeField, TextArea(2, 4)] private string[] memoryFragments =
+        [SerializeField, TextArea(2, 4)]
+        private string[] memoryFragments =
         {
             "Cold stone... Where am I?",
             "A silver crest. A name I cannot quite recall...",
@@ -60,7 +80,8 @@ namespace Mourneveil
             "Mourneveil... Why does that name hurt?"
         };
 
-        [SerializeField, TextArea(2, 5)] private string[] friendDialogue =
+        [SerializeField, TextArea(2, 5)]
+        private string[] friendDialogue =
         {
             "There you are. I was afraid you wouldn't wake.",
             "I left those bottles beside you. I knew you would be starving.",
@@ -70,32 +91,34 @@ namespace Mourneveil
             "The bottles were only enough to wake you. Come. We have to find more blood."
         };
 
-        [Header("v0.2 — Optional visuals")]
-        [Tooltip("Fullscreen BLACK UI Image. Put it above all other UI, disable Raycast Target, start with alpha 0 in Inspector.")]
+        [Header("v0.2 - Optional visuals")]
         [SerializeField] private Image blackFadeOverlay;
-        [Tooltip("Fullscreen PALE RED UI Image. Put it above the background but below text/buttons; Raycast Target OFF.")]
         [SerializeField] private Image memoryFlashOverlay;
-        [Tooltip("Optional RectTransform to shake during door knocks (e.g. crypt background). Leave empty to disable shake.")]
         [SerializeField] private RectTransform shakeTarget;
         [SerializeField, Min(0f)] private float introFadeSeconds = 1.8f;
         [SerializeField, Min(0f)] private float memoryFlashSeconds = 0.32f;
         [SerializeField, Range(0f, 20f)] private float knockShakePixels = 9f;
-        [Tooltip("Turn ON to avoid flashing, shaking and animated typing.")]
+        [Tooltip("Disables flashing, shaking and animated dialogue typing.")]
         [SerializeField] private bool reduceMotion = false;
 
-        [Header("v0.2 — Optional dialogue typewriter")]
+        [Header("v0.2 - Optional dialogue typewriter")]
         [SerializeField] private bool typewriterEnabled = true;
         [SerializeField, Range(10f, 120f)] private float dialogueCharactersPerSecond = 42f;
 
-        [Header("v0.2 — Optional heartbeat")]
-        [Tooltip("Separate AudioSource used ONLY for heartbeat. Set Play On Awake OFF and Spatial Blend 0 (2D).")]
+        [Header("v0.2 - Optional heartbeat")]
         [SerializeField] private AudioSource heartbeatSource;
         [SerializeField] private AudioClip heartbeatSound;
 
         private ProloguePhase phase;
         private int vialsRemaining;
+        private int totalVials;
         private int dialogueIndex;
+        private bool usingInteractiveVials;
+        private bool[] consumedVials;
+        private bool openingFadeInProgress;
         private bool typingDialogue;
+
+        private UnityAction[] vialClickActions;
         private Coroutine sequence;
         private Coroutine dialogueTyping;
         private Coroutine memoryFlash;
@@ -104,17 +127,58 @@ namespace Mourneveil
 
         private void Start()
         {
-            if (drinkButton == null || storyText == null || vialsText == null ||
-                friendPanel == null || friendDialogueText == null ||
-                nextDialogueButton == null || endPanel == null)
+            if (storyText == null || vialsText == null || friendPanel == null ||
+                friendDialogueText == null || nextDialogueButton == null || endPanel == null)
             {
-                Debug.LogError("[Mourneveil Prologue] Required UI references are missing in the Inspector.", this);
+                Debug.LogError("[Mourneveil Prologue] Missing required text/panel references on _Prologue.", this);
                 enabled = false;
                 return;
             }
 
-            // The script attaches button listeners. Keep the buttons' On Click() lists empty in the Inspector.
-            drinkButton.onClick.AddListener(DrinkFromVial);
+            usingInteractiveVials = bloodVials != null && bloodVials.Length > 0;
+            totalVials = usingInteractiveVials ? bloodVials.Length : Mathf.Max(1, startingVials);
+
+            if (usingInteractiveVials)
+            {
+                for (int i = 0; i < bloodVials.Length; i++)
+                {
+                    if (bloodVials[i] == null || bloodVials[i].button == null)
+                    {
+                        Debug.LogError($"[Mourneveil Prologue] Assign Button for Blood Vials Element {i}.", this);
+                        enabled = false;
+                        return;
+                    }
+                }
+
+                consumedVials = new bool[totalVials];
+                vialClickActions = new UnityAction[totalVials];
+
+                for (int i = 0; i < totalVials; i++)
+                {
+                    int vialIndex = i; // Each listener captures its OWN index.
+                    vialClickActions[i] = () => OnBloodVialClicked(vialIndex);
+                    bloodVials[i].button.onClick.AddListener(vialClickActions[i]);
+                }
+
+                // Preserve serialized legacy Drink Button, but don't show a second way to drink.
+                if (drinkButton != null)
+                    drinkButton.gameObject.SetActive(false);
+
+                if (startingVials != totalVials)
+                    Debug.LogWarning("[Mourneveil Prologue] Starting Vials is ignored when interactive Blood Vials are configured. Using " + totalVials + ".", this);
+            }
+            else
+            {
+                if (drinkButton == null)
+                {
+                    Debug.LogError("[Mourneveil Prologue] Add Blood Vials or assign the old Drink Button.", this);
+                    enabled = false;
+                    return;
+                }
+
+                drinkButton.onClick.AddListener(DrinkFromVial);
+            }
+
             nextDialogueButton.onClick.AddListener(NextDialogue);
 
             if (shakeTarget != null)
@@ -127,48 +191,138 @@ namespace Mourneveil
         {
             if (drinkButton != null)
                 drinkButton.onClick.RemoveListener(DrinkFromVial);
+
             if (nextDialogueButton != null)
                 nextDialogueButton.onClick.RemoveListener(NextDialogue);
+
+            if (vialClickActions != null && bloodVials != null)
+            {
+                for (int i = 0; i < vialClickActions.Length; i++)
+                {
+                    if (bloodVials[i] != null && bloodVials[i].button != null)
+                        bloodVials[i].button.onClick.RemoveListener(vialClickActions[i]);
+                }
+            }
+
             StopHeartbeat();
         }
 
+        /// <summary>Legacy fallback for the original single Drink button.</summary>
         public void DrinkFromVial()
         {
-            if (phase != ProloguePhase.Drinking || vialsRemaining <= 0 || !drinkButton.interactable)
+            if (usingInteractiveVials || phase != ProloguePhase.Drinking ||
+                openingFadeInProgress || vialsRemaining <= 0)
                 return;
 
+            ConsumeOneVial(-1);
+        }
+
+        private void OnBloodVialClicked(int index)
+        {
+            if (!usingInteractiveVials || phase != ProloguePhase.Drinking ||
+                openingFadeInProgress || vialsRemaining <= 0 ||
+                index < 0 || index >= totalVials || consumedVials[index])
+                return;
+
+            if (requireSequentialVials && index != totalVials - vialsRemaining)
+                return;
+
+            ConsumeOneVial(index);
+        }
+
+        private void ConsumeOneVial(int clickedIndex)
+        {
+            if (phase != ProloguePhase.Drinking || vialsRemaining <= 0)
+                return;
+
+            if (usingInteractiveVials)
+                consumedVials[clickedIndex] = true;
+
             vialsRemaining--;
-            int consumedCount = Mathf.Max(1, startingVials) - vialsRemaining;
+            int consumedCount = totalVials - vialsRemaining;
 
             if (memoryText != null && memoryFragments != null && memoryFragments.Length > 0)
             {
-                int index = Mathf.Min(consumedCount - 1, memoryFragments.Length - 1);
-                memoryText.text = memoryFragments[index];
+                int memoryIndex = Mathf.Min(consumedCount - 1, memoryFragments.Length - 1);
+                memoryText.text = memoryFragments[memoryIndex];
             }
 
             PlaySound(drinkingSound);
             RefreshVials();
 
             if (memoryFlash != null)
+            {
                 StopCoroutine(memoryFlash);
+                memoryFlash = null;
+            }
+
             SetImageAlpha(memoryFlashOverlay, 0f);
             if (!reduceMotion && memoryFlashOverlay != null)
                 memoryFlash = StartCoroutine(FlashMemory());
 
-            if (vialsRemaining == 0)
+            if (vialsRemaining <= 0)
             {
-                drinkButton.interactable = false;
+                SetButtonsInteractable(false);
                 sequence = StartCoroutine(HungerAndKnocking());
             }
         }
 
+        private void SetButtonsInteractable(bool allowDrinking)
+        {
+            bool canDrink = allowDrinking && phase == ProloguePhase.Drinking &&
+                            !openingFadeInProgress && vialsRemaining > 0;
+
+            if (!usingInteractiveVials)
+            {
+                if (drinkButton != null)
+                    drinkButton.interactable = canDrink;
+                return;
+            }
+
+            int nextIndex = totalVials - vialsRemaining;
+            for (int i = 0; i < totalVials; i++)
+            {
+                if (bloodVials[i] != null && bloodVials[i].button != null)
+                    bloodVials[i].button.interactable = canDrink && !consumedVials[i] &&
+                        (!requireSequentialVials || i == nextIndex);
+            }
+        }
+
+        private void RefreshVials()
+        {
+            vialsText.text = "Blood vials: " + vialsRemaining + " / " + totalVials;
+
+            if (usingInteractiveVials)
+            {
+                for (int i = 0; i < totalVials; i++)
+                {
+                    if (bloodVials[i] != null && bloodVials[i].emptyOverlay != null)
+                        bloodVials[i].emptyOverlay.SetActive(consumedVials[i]);
+                }
+            }
+            else if (vialIcons != null)
+            {
+                // Legacy decorative icon logic retained for existing v0.2 scenes.
+                for (int i = 0; i < vialIcons.Length; i++)
+                {
+                    if (vialIcons[i] != null)
+                        vialIcons[i].SetActive(i < vialsRemaining);
+                }
+            }
+
+            SetButtonsInteractable(true);
+        }
+
         private IEnumerator OpeningFade()
         {
-            drinkButton.interactable = false;
+            openingFadeInProgress = true;
+            SetButtonsInteractable(false);
+
             if (blackFadeOverlay == null || reduceMotion || introFadeSeconds <= 0f)
             {
                 SetImageAlpha(blackFadeOverlay, 0f);
-                drinkButton.interactable = true;
+                openingFadeInProgress = false;
+                SetButtonsInteractable(true);
                 openingFade = null;
                 yield break;
             }
@@ -183,7 +337,8 @@ namespace Mourneveil
             }
 
             SetImageAlpha(blackFadeOverlay, 0f);
-            drinkButton.interactable = true;
+            openingFadeInProgress = false;
+            SetButtonsInteractable(true);
             openingFade = null;
         }
 
@@ -195,8 +350,7 @@ namespace Mourneveil
             {
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
-                float strength = (1f - t) * 0.25f;
-                SetImageAlpha(memoryFlashOverlay, strength);
+                SetImageAlpha(memoryFlashOverlay, (1f - t) * 0.25f);
                 yield return null;
             }
 
@@ -208,8 +362,8 @@ namespace Mourneveil
         {
             phase = ProloguePhase.Hunger;
             storyText.text = "The last bottle is empty. The hunger is not.";
-
             StartHeartbeat();
+
             float elapsed = 0f;
             float duration = Mathf.Max(0.5f, hungerSeconds);
             while (elapsed < duration)
@@ -264,10 +418,9 @@ namespace Mourneveil
                 elapsed += Time.deltaTime;
                 float strength = knockShakePixels * (1f - Mathf.Clamp01(elapsed / duration));
                 shakeTarget.anchoredPosition = shakeOriginalPosition +
-                    new Vector2(Random.Range(-strength, strength), Random.Range(-strength, strength));
+                    new Vector2(UnityEngine.Random.Range(-strength, strength), UnityEngine.Random.Range(-strength, strength));
                 yield return null;
             }
-
             shakeTarget.anchoredPosition = shakeOriginalPosition;
         }
 
@@ -352,21 +505,9 @@ namespace Mourneveil
             endPanel.SetActive(true);
             if (endText != null)
             {
-                endText.text = "CHAPTER II — THE FIRST HUNT\n\n" +
+                endText.text = "CHAPTER II - THE FIRST HUNT\n\n" +
                     "The last heir of Mourneveil must feed.\n" +
                     "To be continued...";
-            }
-        }
-
-        private void RefreshVials()
-        {
-            vialsText.text = "Blood vials: " + vialsRemaining + " / " + Mathf.Max(1, startingVials);
-            if (vialIcons == null) return;
-
-            for (int i = 0; i < vialIcons.Length; i++)
-            {
-                if (vialIcons[i] != null)
-                    vialIcons[i].SetActive(i < vialsRemaining);
             }
         }
 
@@ -394,7 +535,6 @@ namespace Mourneveil
         {
             if (heartbeatSource == null)
                 return;
-
             heartbeatSource.Stop();
             heartbeatSource.pitch = 1f;
         }
@@ -422,14 +562,18 @@ namespace Mourneveil
             openingFade = null;
             dialogueTyping = null;
             typingDialogue = false;
+            openingFadeInProgress = true;
             StopHeartbeat();
 
             if (shakeTarget != null)
                 shakeTarget.anchoredPosition = shakeOriginalPosition;
 
             phase = ProloguePhase.Drinking;
-            vialsRemaining = Mathf.Max(1, startingVials);
+            vialsRemaining = totalVials;
             dialogueIndex = 0;
+            if (consumedVials != null)
+                Array.Clear(consumedVials, 0, consumedVials.Length);
+
             if (introPanel != null) introPanel.SetActive(true);
             friendPanel.SetActive(false);
             endPanel.SetActive(false);
@@ -439,6 +583,7 @@ namespace Mourneveil
 
             SetImageAlpha(hungerOverlay, 0f);
             SetImageAlpha(memoryFlashOverlay, 0f);
+            SetImageAlpha(blackFadeOverlay, 0f);
             RefreshVials();
             openingFade = StartCoroutine(OpeningFade());
         }
