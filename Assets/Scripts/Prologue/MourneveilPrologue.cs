@@ -15,10 +15,33 @@ namespace Mourneveil
 
         [Tooltip("Optional child object showing an empty/dimmed vial after drinking. Start inactive. Disable Raycast Target on its Image.")]
         public GameObject emptyOverlay;
+
+        [Tooltip("Optional child RectTransform containing only the bottle art. If empty, animates the Button itself.")]
+        public RectTransform visualTransform;
+
+        [Tooltip("Optional CanvasGroup on the visualTransform (or on the button). Used for a gentle fade during drinking.")]
+        public CanvasGroup canvasGroup;
+    }
+
+    public enum PrologueSpeaker { Lucien, Rowan }
+
+    [Serializable]
+    public class PrologueDialogueLine
+    {
+        public PrologueSpeaker speaker = PrologueSpeaker.Rowan;
+        [TextArea(2, 5)] public string text;
+
+        public PrologueDialogueLine() { }
+
+        public PrologueDialogueLine(PrologueSpeaker who, string content)
+        {
+            speaker = who;
+            text = content;
+        }
     }
 
     /// <summary>
-    /// Prologue v0.3: five interactive blood vials, while retaining v0.2
+    /// Prologue v0.4: animated blood vials and character portraits; retains v0.2
     /// intro fade, flashbacks, hunger, heartbeat, knocks and typewriter.
     /// Attach to _Prologue in Crypt_Intro (not to each vial).
     /// </summary>
@@ -49,6 +72,13 @@ namespace Mourneveil
         [Tooltip("If true, only the next vial can be clicked. If false, the player can drink the 5 vials in any order.")]
         [SerializeField] private bool requireSequentialVials = true;
 
+        [Header("v0.4 - Vial Animation")]
+        [SerializeField] private bool animateVials = true;
+        [SerializeField, Range(0.10f, 1f)] private float vialAnimationSeconds = 0.32f;
+        [SerializeField, Range(0f, 70f)] private float vialLiftPixels = 26f;
+        [SerializeField, Range(0f, 50f)] private float vialTiltDegrees = 18f;
+        [SerializeField, Range(0.55f, 1f)] private float vialShrinkScale = 0.84f;
+
         [Header("Atmosphere - existing v0.2 references")]
         [SerializeField] private Image hungerOverlay;
         [SerializeField] private AudioSource soundSource;
@@ -59,6 +89,36 @@ namespace Mourneveil
         [SerializeField] private GameObject friendPanel;
         [SerializeField] private TMP_Text friendDialogueText;
         [SerializeField] private Button nextDialogueButton;
+
+        [Header("v0.4 - Dialogue Portraits (optional)")]
+        [SerializeField] private Image lucienPortrait;
+        [SerializeField] private Image rowanPortrait;
+        [SerializeField] private TMP_Text speakerNameText;
+        [SerializeField, Range(0.1f, 1f)] private float inactivePortraitBrightness = 0.46f;
+        [SerializeField, Range(0f, 1f)] private float portraitFadeSeconds = 0.22f;
+
+        [Tooltip("OFF preserves your existing v0.2/v0.3 Friend Dialogue text. ON uses the speaker-aware lines below.")]
+        [SerializeField] private bool useCharacterDialogue = false;
+        [SerializeField]
+        private PrologueDialogueLine[] characterDialogue =
+        {
+            new PrologueDialogueLine(PrologueSpeaker.Rowan, "Lucien...? Thank the night. I was afraid you would never wake."),
+            new PrologueDialogueLine(PrologueSpeaker.Lucien, "Who are you...?"),
+            new PrologueDialogueLine(PrologueSpeaker.Rowan, "Rowan. I left those bottles for you. I knew you would be starving."),
+            new PrologueDialogueLine(PrologueSpeaker.Lucien, "Mourneveil... I remember fire. My family..."),
+            new PrologueDialogueLine(PrologueSpeaker.Rowan, "The hunters came. Your family... they're gone."),
+            new PrologueDialogueLine(PrologueSpeaker.Lucien, "And you? Why did you come back for me?"),
+            new PrologueDialogueLine(PrologueSpeaker.Rowan, "Because you're my friend. The last heir must survive."),
+            new PrologueDialogueLine(PrologueSpeaker.Lucien, "I need more blood."),
+            new PrologueDialogueLine(PrologueSpeaker.Rowan, "Then come. There's a park nearby. We must be careful.")
+        };
+        [Tooltip("Speaker for each original Friend Dialogue element (only used while Use Character Dialogue is OFF).")]
+        [SerializeField]
+        private PrologueSpeaker[] legacyDialogueSpeakers =
+        {
+            PrologueSpeaker.Rowan, PrologueSpeaker.Rowan, PrologueSpeaker.Rowan,
+            PrologueSpeaker.Rowan, PrologueSpeaker.Rowan, PrologueSpeaker.Rowan
+        };
 
         [Header("End of current prototype - existing v0.2 references")]
         [SerializeField] private GameObject endPanel;
@@ -117,6 +177,17 @@ namespace Mourneveil
         private bool[] consumedVials;
         private bool openingFadeInProgress;
         private bool typingDialogue;
+        private bool vialAnimationInProgress;
+        private Coroutine vialAnimation;
+        private Coroutine portraitTransition;
+        private RectTransform animatedVialTransform;
+        private CanvasGroup animatedVialCanvasGroup;
+        private Vector3 vialOriginalLocalPosition;
+        private Vector3 vialOriginalLocalScale;
+        private Quaternion vialOriginalLocalRotation;
+        private float vialOriginalAlpha;
+        private Color lucienPortraitBaseColor = Color.white;
+        private Color rowanPortraitBaseColor = Color.white;
 
         private UnityAction[] vialClickActions;
         private Coroutine sequence;
@@ -183,6 +254,8 @@ namespace Mourneveil
 
             if (shakeTarget != null)
                 shakeOriginalPosition = shakeTarget.anchoredPosition;
+            if (lucienPortrait != null) lucienPortraitBaseColor = lucienPortrait.color;
+            if (rowanPortrait != null) rowanPortraitBaseColor = rowanPortrait.color;
 
             RestartPrologue();
         }
@@ -204,6 +277,7 @@ namespace Mourneveil
                 }
             }
 
+            RestoreVialVisual();
             StopHeartbeat();
         }
 
@@ -226,8 +300,72 @@ namespace Mourneveil
 
             if (requireSequentialVials && index != totalVials - vialsRemaining)
                 return;
+            if (vialAnimationInProgress)
+                return;
 
-            ConsumeOneVial(index);
+            if (animateVials && !reduceMotion)
+                vialAnimation = StartCoroutine(DrinkVialAnimation(index));
+            else
+                ConsumeOneVial(index);
+        }
+
+        private IEnumerator DrinkVialAnimation(int index)
+        {
+            vialAnimationInProgress = true;
+            SetButtonsInteractable(false);
+
+            BloodVialUI vial = bloodVials[index];
+            animatedVialTransform = vial.visualTransform != null
+                ? vial.visualTransform : vial.button.GetComponent<RectTransform>();
+            animatedVialCanvasGroup = vial.canvasGroup;
+            if (animatedVialCanvasGroup == null && animatedVialTransform != null)
+                animatedVialCanvasGroup = animatedVialTransform.GetComponent<CanvasGroup>();
+
+            if (animatedVialTransform != null)
+            {
+                vialOriginalLocalPosition = animatedVialTransform.localPosition;
+                vialOriginalLocalScale = animatedVialTransform.localScale;
+                vialOriginalLocalRotation = animatedVialTransform.localRotation;
+            }
+            vialOriginalAlpha = animatedVialCanvasGroup != null ? animatedVialCanvasGroup.alpha : 1f;
+
+            float duration = Mathf.Max(0.05f, vialAnimationSeconds);
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float smooth = t * t * (3f - 2f * t);
+                if (animatedVialTransform != null)
+                {
+                    animatedVialTransform.localPosition = vialOriginalLocalPosition + Vector3.up * (vialLiftPixels * smooth);
+                    animatedVialTransform.localScale = Vector3.Lerp(vialOriginalLocalScale, vialOriginalLocalScale * vialShrinkScale, smooth);
+                    animatedVialTransform.localRotation = vialOriginalLocalRotation * Quaternion.Euler(0f, 0f, -vialTiltDegrees * smooth);
+                }
+                if (animatedVialCanvasGroup != null)
+                    animatedVialCanvasGroup.alpha = Mathf.Lerp(vialOriginalAlpha, 0.15f, smooth);
+                yield return null;
+            }
+
+            // Restore original visuals so EmptyOverlay can mark the vial as consumed.
+            RestoreVialVisual();
+            vialAnimationInProgress = false;
+            vialAnimation = null;
+            ConsumeOneVial(index); // Existing memories, audio, hunger and knocking.
+        }
+
+        private void RestoreVialVisual()
+        {
+            if (animatedVialTransform != null)
+            {
+                animatedVialTransform.localPosition = vialOriginalLocalPosition;
+                animatedVialTransform.localScale = vialOriginalLocalScale;
+                animatedVialTransform.localRotation = vialOriginalLocalRotation;
+            }
+            if (animatedVialCanvasGroup != null)
+                animatedVialCanvasGroup.alpha = vialOriginalAlpha;
+            animatedVialTransform = null;
+            animatedVialCanvasGroup = null;
         }
 
         private void ConsumeOneVial(int clickedIndex)
@@ -270,7 +408,7 @@ namespace Mourneveil
         private void SetButtonsInteractable(bool allowDrinking)
         {
             bool canDrink = allowDrinking && phase == ProloguePhase.Drinking &&
-                            !openingFadeInProgress && vialsRemaining > 0;
+                            !openingFadeInProgress && !vialAnimationInProgress && vialsRemaining > 0;
 
             if (!usingInteractiveVials)
             {
@@ -434,6 +572,75 @@ namespace Mourneveil
             ShowDialogueLine();
         }
 
+        private int DialogueCount()
+        {
+            if (useCharacterDialogue && characterDialogue != null && characterDialogue.Length > 0)
+                return characterDialogue.Length;
+            return friendDialogue != null ? friendDialogue.Length : 0;
+        }
+
+        private string DialogueTextAt(int index)
+        {
+            if (useCharacterDialogue && characterDialogue != null && characterDialogue.Length > 0)
+                return characterDialogue[index] != null ? characterDialogue[index].text : "";
+            return friendDialogue[index];
+        }
+
+        private PrologueSpeaker SpeakerAt(int index)
+        {
+            if (useCharacterDialogue && characterDialogue != null && characterDialogue.Length > 0)
+                return characterDialogue[index] != null ? characterDialogue[index].speaker : PrologueSpeaker.Rowan;
+            if (legacyDialogueSpeakers != null && index < legacyDialogueSpeakers.Length)
+                return legacyDialogueSpeakers[index];
+            return PrologueSpeaker.Rowan;
+        }
+
+        private void UpdateSpeakerVisuals(PrologueSpeaker speaker)
+        {
+            if (speakerNameText != null)
+                speakerNameText.text = speaker == PrologueSpeaker.Lucien ? "Lucien" : "Rowan";
+
+            Color lucienTarget = PortraitTint(lucienPortraitBaseColor, speaker == PrologueSpeaker.Lucien);
+            Color rowanTarget = PortraitTint(rowanPortraitBaseColor, speaker == PrologueSpeaker.Rowan);
+            if (portraitTransition != null)
+                StopCoroutine(portraitTransition);
+            portraitTransition = null;
+
+            if (reduceMotion || portraitFadeSeconds <= 0f)
+            {
+                if (lucienPortrait != null) lucienPortrait.color = lucienTarget;
+                if (rowanPortrait != null) rowanPortrait.color = rowanTarget;
+            }
+            else
+                portraitTransition = StartCoroutine(FadePortraits(lucienTarget, rowanTarget));
+        }
+
+        private Color PortraitTint(Color baseColor, bool active)
+        {
+            if (active) return baseColor;
+            return new Color(baseColor.r * inactivePortraitBrightness,
+                baseColor.g * inactivePortraitBrightness,
+                baseColor.b * inactivePortraitBrightness, baseColor.a);
+        }
+
+        private IEnumerator FadePortraits(Color lucienTarget, Color rowanTarget)
+        {
+            Color lucienStart = lucienPortrait != null ? lucienPortrait.color : Color.white;
+            Color rowanStart = rowanPortrait != null ? rowanPortrait.color : Color.white;
+            float elapsed = 0f;
+            while (elapsed < portraitFadeSeconds)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / portraitFadeSeconds);
+                if (lucienPortrait != null) lucienPortrait.color = Color.Lerp(lucienStart, lucienTarget, t);
+                if (rowanPortrait != null) rowanPortrait.color = Color.Lerp(rowanStart, rowanTarget, t);
+                yield return null;
+            }
+            if (lucienPortrait != null) lucienPortrait.color = lucienTarget;
+            if (rowanPortrait != null) rowanPortrait.color = rowanTarget;
+            portraitTransition = null;
+        }
+
         public void NextDialogue()
         {
             if (phase != ProloguePhase.Dialogue)
@@ -450,7 +657,7 @@ namespace Mourneveil
             }
 
             dialogueIndex++;
-            if (friendDialogue == null || dialogueIndex >= friendDialogue.Length)
+            if (dialogueIndex >= DialogueCount())
             {
                 FinishPrologue();
                 return;
@@ -468,10 +675,17 @@ namespace Mourneveil
             }
             typingDialogue = false;
 
-            if (friendDialogue == null || friendDialogue.Length == 0)
+            if (DialogueCount() == 0)
+            {
                 friendDialogueText.text = "We must leave. The night is waiting.";
+                UpdateSpeakerVisuals(PrologueSpeaker.Rowan);
+            }
             else
-                friendDialogueText.text = friendDialogue[Mathf.Clamp(dialogueIndex, 0, friendDialogue.Length - 1)];
+            {
+                int line = Mathf.Clamp(dialogueIndex, 0, DialogueCount() - 1);
+                friendDialogueText.text = DialogueTextAt(line);
+                UpdateSpeakerVisuals(SpeakerAt(line));
+            }
 
             friendDialogueText.maxVisibleCharacters = int.MaxValue;
             if (typewriterEnabled && !reduceMotion)
@@ -557,6 +771,13 @@ namespace Mourneveil
             }
 
             StopAllCoroutines();
+            RestoreVialVisual();
+            vialAnimationInProgress = false;
+            vialAnimation = null;
+            portraitTransition = null;
+            if (lucienPortrait != null) lucienPortrait.color = lucienPortraitBaseColor;
+            if (rowanPortrait != null) rowanPortrait.color = rowanPortraitBaseColor;
+            if (speakerNameText != null) speakerNameText.text = "";
             sequence = null;
             memoryFlash = null;
             openingFade = null;
