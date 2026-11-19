@@ -1,10 +1,11 @@
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// Mourneveil Park v0.4: detection, AI reactions and stealth rewards over v0.3 movement.
+// Mourneveil Park v0.5.1: Dynasty Management + readable, acknowledged hunt outcomes.
 // Generates its UI at runtime; no prefabs or editor scripts are required.
 [DisallowMultipleComponent]
 public class MourneveilParkUI : MonoBehaviour
@@ -20,6 +21,10 @@ public class MourneveilParkUI : MonoBehaviour
     [SerializeField, Range(0.3f, 2f)] private float detectionDifficulty = 1f;
     [SerializeField, Range(0.05f, 1f)] private float sneakDetectionMultiplier = 0.22f;
 
+    [Header("v0.5.1 - Hunt results")]
+    [Tooltip("If enabled, every completed hunt shows a result popup. Click CONTINUE HUNTING to dismiss it.")]
+    [SerializeField] private bool showHuntOutcomePopup = true;
+
     private readonly Color ivory = new Color(0.94f, 0.85f, 0.80f);
     private readonly Color muted = new Color(0.73f, 0.60f, 0.61f);
     private readonly Color panel = new Color(0.085f, 0.034f, 0.055f, 0.96f);
@@ -30,7 +35,16 @@ public class MourneveilParkUI : MonoBehaviour
     private TMP_Text networkText, allyText, resultText, warningText;
     private TMP_Text networkButtonLabel, layLowButtonLabel;
     private Button leaveButton, smallButton, eraseButton, drainButton, turnButton;
-    private Button networkButton, layLowButton;
+    private Button networkButton, layLowButton, manageDynastyButton;
+
+    // v0.5 - Modal Dynasty roster, generated without custom prefabs.
+    private RectTransform rosterOverlay, rosterListContent;
+    private TMP_Text rosterCounter, rosterName, rosterStats, rosterRoleInfo, rosterEmptyHint;
+    private Image rosterPortrait;
+    private readonly Button[] roleButtons = new Button[4];
+    private int selectedFollowerId = -1;
+    private int rosterCachedCount = -1;
+    private bool rosterDirty = true;
     private readonly MourneveilParkWalker[] walkers = new MourneveilParkWalker[3];
     private MourneveilParkPlayer player;
     private MourneveilParkGame gameRef;
@@ -38,6 +52,16 @@ public class MourneveilParkUI : MonoBehaviour
     private int markedWalker = -1;
     private int lastEngagedWalker = -1;
     private int lastResolvedCount;
+
+    // UI-only result state: never overwrites the saved progress or lastMessage.
+    private RectTransform outcomeOverlay;
+    private TMP_Text outcomeHeadingText, outcomeBodyText;
+    private string pinnedOutcomeMessage;
+    private bool IsOutcomeVisible
+    {
+        get { return outcomeOverlay != null && outcomeOverlay.gameObject.activeSelf; }
+    }
+
     private bool built;
 
     public void Build(MourneveilParkGame game)
@@ -64,7 +88,7 @@ public class MourneveilParkUI : MonoBehaviour
         if (EventSystem.current == null)
             Debug.LogWarning("[Mourneveil Park] Add UI > Event System to the scene if buttons do not respond.");
 
-        RectTransform root = NewRect("Park_Runtime_UI_v04", canvas.transform);
+        RectTransform root = NewRect("Park_Runtime_UI_v05", canvas.transform);
         Stretch(root);
 
         // Fullscreen backdrop + shade; the clear version is visible in the park window.
@@ -169,11 +193,12 @@ public class MourneveilParkUI : MonoBehaviour
         Place(networkText.rectTransform, 25, 166, 580, 78);
         networkButton = MakeButton(dynasty, "UPGRADE SUPPLY NETWORK", 23, 267, 578, 68, game.BuySupplyNetwork);
         networkButtonLabel = networkButton.GetComponentInChildren<TextMeshProUGUI>();
-        allyText = AddText("Allies", dynasty, "", 24, ivory, TextAlignmentOptions.TopLeft);
-        Place(allyText.rectTransform, 25, 358, 570, 85);
-        warningText = AddText("Hunter Warning", dynasty, "", 21, muted,
+        allyText = AddText("Allies", dynasty, "", 23, ivory, TextAlignmentOptions.TopLeft);
+        Place(allyText.rectTransform, 25, 350, 570, 70);
+        manageDynastyButton = MakeButton(dynasty, "MANAGE DYNASTY", 25, 421, 578, 51, OpenRoster);
+        warningText = AddText("Hunter Warning", dynasty, "", 20, muted,
             TextAlignmentOptions.TopLeft);
-        Place(warningText.rectTransform, 25, 467, 574, 66);
+        Place(warningText.rectTransform, 25, 486, 574, 56);
         layLowButton = MakeButton(dynasty, "LAY LOW", 25, 550, 277, 61, game.LayLow);
         layLowButtonLabel = layLowButton.GetComponentInChildren<TextMeshProUGUI>();
         MakeButton(dynasty, "SAVE PROGRESS", 317, 550, 284, 61, game.SaveNow);
@@ -184,6 +209,8 @@ public class MourneveilParkUI : MonoBehaviour
             muted, TextAlignmentOptions.TopLeft);
         Place(resultText.rectTransform, 25, 685, 570, 84);
 
+        BuildDynastyRoster(root);
+        BuildOutcomePopup(root); // Last sibling: always above the rest of the park UI.
         built = true;
     }
 
@@ -215,9 +242,18 @@ public class MourneveilParkUI : MonoBehaviour
                 ? "Your presence is exposed. Lay low or wait for Suspicion to decrease."
                 : "Walk around with WASD. Approach a person and press E to start the hunt.";
         }
-        if (engaged) lastEngagedWalker = Mathf.Clamp(person.appearanceIndex, 0, 2);
+        if (engaged)
+        {
+            lastEngagedWalker = Mathf.Clamp(person.appearanceIndex, 0, 2);
+            pinnedOutcomeMessage = null; // New encounter: old result no longer needs to stay pinned.
+        }
         else if (state.encountersResolved != lastResolvedCount)
         {
+            // CompleteEncounter() updates lastMessage and calls Refresh() immediately.
+            // Capture the outcome *before* an NPC detection can overwrite lastMessage.
+            pinnedOutcomeMessage = state.lastMessage;
+            if (showHuntOutcomePopup)
+                ShowOutcomePopup(pinnedOutcomeMessage);
             if (lastEngagedWalker >= 0 && lastEngagedWalker < walkers.Length && walkers[lastEngagedWalker] != null)
             {
                 walkers[lastEngagedWalker].BeginRespawn();
@@ -227,13 +263,15 @@ public class MourneveilParkUI : MonoBehaviour
             markedWalker = -1;
         }
         lastResolvedCount = state.encountersResolved;
-        player.SetEncounterActive(engaged);
+        bool rosterOpen = rosterOverlay != null && rosterOverlay.gameObject.activeSelf;
+        bool outcomeOpen = IsOutcomeVisible;
+        player.SetEncounterActive(engaged || rosterOpen || outcomeOpen);
         for (int i = 0; i < walkers.Length; i++)
         {
             if (walkers[i] != null)
             {
                 walkers[i].SetState(engaged && person.appearanceIndex == i,
-                    engaged || game.HuntersAlerted);
+                    engaged || rosterOpen || outcomeOpen || game.HuntersAlerted);
                 walkers[i].SetMarked(!engaged && markedWalker == i);
             }
         }
@@ -253,8 +291,12 @@ public class MourneveilParkUI : MonoBehaviour
             "\nPassive Blood: +" + game.BloodPerSecond.ToString("0.00") + "/sec";
         networkButtonLabel.text = "UPGRADE SUPPLY  -  " + game.NetworkUpgradeCost + " BLOOD";
         int allies = state.followers == null ? 0 : state.followers.Count;
-        allyText.text = "Vampiric allies: " + allies +
-            "\nAllies also gather Blood automatically.";
+        allyText.text = "Vampires: " + allies + "  |  H " + game.CountRole(ParkFollowerRole.Hunter) +
+            " / S " + game.CountRole(ParkFollowerRole.Spy) +
+            " / R " + game.CountRole(ParkFollowerRole.Scholar) +
+            " / G " + game.CountRole(ParkFollowerRole.Guardian) +
+            "\nScholar boost: +" + (game.ScholarBonus * 100f).ToString("0") + "% Blood/sec";
+        manageDynastyButton.interactable = allies > 0 && !engaged;
         warningText.text = game.HuntersAlerted
             ? "HUNTER ALERT! Hunting blocked until Suspicion falls."
             : (state.humanity < 35
@@ -269,7 +311,291 @@ public class MourneveilParkUI : MonoBehaviour
               game.TurnCost.ToString("0") + " Soul." +
               (state.currentEncounterAmbush ? "  UNDETECTED BONUS!" : "")
             : "Approach quietly for a stealth reward. Intelligent NPCs detect you sooner.";
-        resultText.text = state.lastMessage;
+        // Keep the last resolved hunt visible in NIGHT LOG even if NPCs later
+        // report spotting Lucien and replace state.lastMessage.
+        resultText.text = !engaged && !string.IsNullOrEmpty(pinnedOutcomeMessage)
+            ? pinnedOutcomeMessage : state.lastMessage;
+        if (rosterOpen) RefreshRoster(game);
+    }
+
+    // --------- v0.5.1: readable encounter outcomes ---------
+    private void BuildOutcomePopup(RectTransform root)
+    {
+        outcomeOverlay = NewRect("Hunt Result Overlay", root);
+        Stretch(outcomeOverlay);
+
+        Image shade = AddImage("Hunt Result Backdrop", outcomeOverlay,
+            new Color(0.012f, 0.004f, 0.016f, 0.86f));
+        Stretch(shade.rectTransform);
+        shade.raycastTarget = true; // Prevent interaction with controls behind the result.
+
+        RectTransform surface = Frame("Hunt Result Frame", outcomeOverlay,
+            425f, 302f, 1070f, 470f);
+        TMP_Text kicker = AddText("Result Kicker", surface, "MOURNEVEIL   /   THE FIRST HUNT",
+            19, muted, TextAlignmentOptions.Left);
+        Place(kicker.rectTransform, 48f, 30f, 940f, 35f);
+
+        outcomeHeadingText = AddText("Hunt Result Heading", surface, "THE HUNT IS OVER",
+            42, ivory, TextAlignmentOptions.Left);
+        Place(outcomeHeadingText.rectTransform, 48f, 90f, 975f, 65f);
+        outcomeHeadingText.fontStyle = FontStyles.Bold;
+
+        outcomeBodyText = AddText("Hunt Result Details", surface, "",
+            27, ivory, TextAlignmentOptions.TopLeft);
+        Place(outcomeBodyText.rectTransform, 48f, 184f, 970f, 130f);
+        outcomeBodyText.textWrappingMode = TextWrappingModes.Normal;
+        outcomeBodyText.overflowMode = TextOverflowModes.Overflow;
+
+        MakeButton(surface, "CONTINUE HUNTING", 340f, 350f, 390f, 80f, CloseOutcomePopup);
+        outcomeOverlay.gameObject.SetActive(false);
+    }
+
+    private void ShowOutcomePopup(string message)
+    {
+        if (outcomeOverlay == null) return;
+        string text = string.IsNullOrWhiteSpace(message)
+            ? "The encounter has ended." : message;
+        bool success = text.StartsWith("Turning succeeded!", StringComparison.OrdinalIgnoreCase);
+        bool failure = text.StartsWith("Turning failed.", StringComparison.OrdinalIgnoreCase);
+
+        outcomeHeadingText.text = success ? "A NEW VAMPIRE AWAKENS"
+            : failure ? "THE TURNING HAS FAILED" : "THE HUNT IS OVER";
+        outcomeHeadingText.color = success
+            ? new Color(0.91f, 0.79f, 0.67f)
+            : failure ? new Color(1f, 0.54f, 0.59f) : ivory;
+        outcomeBodyText.text = text;
+        outcomeOverlay.gameObject.SetActive(true);
+    }
+
+    private void CloseOutcomePopup()
+    {
+        if (outcomeOverlay != null) outcomeOverlay.gameObject.SetActive(false);
+        if (gameRef != null) Refresh(gameRef);
+    }
+
+    // --------- v0.5: Dynasty management screen ---------
+    private void BuildDynastyRoster(RectTransform root)
+    {
+        rosterOverlay = NewRect("Dynasty Management Overlay", root);
+        Stretch(rosterOverlay);
+        Image shade = AddImage("Modal Backdrop", rosterOverlay, new Color(0.015f, 0.004f, 0.016f, 0.97f));
+        Stretch(shade.rectTransform);
+        shade.raycastTarget = true; // Block clicks on the hunting UI behind the modal.
+
+        RectTransform surface = Frame("Dynasty Roster Frame", rosterOverlay, 265, 98, 1390, 866);
+        TMP_Text heading = AddText("Dynasty Header", surface,
+            "THE VAMPIRE DYNASTY", 35, ivory, TextAlignmentOptions.Left);
+        Place(heading.rectTransform, 34, 19, 740, 50);
+        rosterCounter = AddText("Roster Count", surface, "", 21, muted, TextAlignmentOptions.Left);
+        Place(rosterCounter.rectTransform, 37, 69, 810, 33);
+        MakeButton(surface, "CLOSE   X", 1134, 22, 222, 55, CloseRoster);
+
+        RectTransform listPanel = Frame("Vampire Roster", surface, 30, 117, 610, 708);
+        TMP_Text leftLabel = AddText("Roster Label", listPanel, "YOUR VAMPIRES", 23, ivory,
+            TextAlignmentOptions.Left);
+        Place(leftLabel.rectTransform, 15, 12, 570, 35);
+
+        RectTransform scrollHost = NewRect("Roster ScrollRect", listPanel);
+        Place(scrollHost, 12, 58, 586, 632);
+        ScrollRect scroller = scrollHost.gameObject.AddComponent<ScrollRect>();
+        scroller.horizontal = false;
+        scroller.vertical = true;
+        scroller.movementType = ScrollRect.MovementType.Clamped;
+        scroller.scrollSensitivity = 38f;
+
+        RectTransform viewport = NewRect("Viewport", scrollHost);
+        Stretch(viewport);
+        Image viewportImage = AddImage("Viewport Click Target", viewport, new Color(0.09f, 0.04f, 0.08f, 0.02f));
+        Stretch(viewportImage.rectTransform);
+        viewportImage.raycastTarget = true;
+        viewport.gameObject.AddComponent<RectMask2D>();
+
+        rosterListContent = NewRect("Roster Items", viewport);
+        rosterListContent.anchorMin = new Vector2(0f, 1f);
+        rosterListContent.anchorMax = new Vector2(1f, 1f);
+        rosterListContent.pivot = new Vector2(0.5f, 1f);
+        rosterListContent.anchoredPosition = Vector2.zero;
+        rosterListContent.sizeDelta = Vector2.zero;
+        VerticalLayoutGroup layout = rosterListContent.gameObject.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(8, 8, 10, 10);
+        layout.spacing = 9f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlHeight = true;
+        layout.childControlWidth = true;
+        layout.childForceExpandHeight = false;
+        layout.childForceExpandWidth = true;
+        ContentSizeFitter fitter = rosterListContent.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        scroller.viewport = viewport;
+        scroller.content = rosterListContent;
+
+        RectTransform details = Frame("Selected Vampire", surface, 662, 117, 697, 708);
+        rosterName = AddText("Selected Name", details, "", 31, ivory, TextAlignmentOptions.Left);
+        Place(rosterName.rectTransform, 20, 12, 648, 49);
+        Image portraitBackground = AddImage("Portrait Background", details, new Color(0.22f, 0.09f, 0.14f));
+        Place(portraitBackground.rectTransform, 20, 80, 192, 290);
+        rosterPortrait = AddImage("Vampire Portrait", details, Color.white);
+        Place(rosterPortrait.rectTransform, 25, 85, 182, 280);
+        rosterPortrait.preserveAspect = true;
+        rosterStats = AddText("Vampire Attributes", details, "", 21, ivory,
+            TextAlignmentOptions.TopLeft);
+        Place(rosterStats.rectTransform, 236, 83, 432, 285);
+        rosterEmptyHint = AddText("Empty Portrait Hint", details, "", 19, muted,
+            TextAlignmentOptions.Center);
+        Place(rosterEmptyHint.rectTransform, 34, 154, 163, 100);
+
+        TMP_Text rolesHeader = AddText("Role Assignment Header", details,
+            "ASSIGN A ROLE", 26, ivory, TextAlignmentOptions.Left);
+        Place(rolesHeader.rectTransform, 20, 393, 625, 43);
+        string[] names = { "HUNTER   /   BLOOD", "SPY   /   SECRECY",
+                           "SCHOLAR   /   RESEARCH", "GUARDIAN   /   PROTECTION" };
+        for (int i = 0; i < roleButtons.Length; i++)
+        {
+            ParkFollowerRole choice = (ParkFollowerRole)i;
+            float x = i % 2 == 0 ? 20f : 356f;
+            float y = i < 2 ? 448f : 526f;
+            roleButtons[i] = MakeButton(details, names[i], x, y, 319f, 64f,
+                () => AssignSelectedRole(choice));
+        }
+        rosterRoleInfo = AddText("Role Description", details, "", 19, muted,
+            TextAlignmentOptions.TopLeft);
+        Place(rosterRoleInfo.rectTransform, 20, 619, 648, 82);
+        rosterOverlay.gameObject.SetActive(false);
+    }
+
+    private void OpenRoster()
+    {
+        if (gameRef == null || gameRef.State.currentHuman != null || IsOutcomeVisible ||
+            gameRef.State.followers == null || gameRef.State.followers.Count == 0) return;
+        if (selectedFollowerId < 0 || gameRef.GetFollower(selectedFollowerId) == null)
+            selectedFollowerId = gameRef.State.followers[0].id;
+        rosterDirty = true;
+        rosterOverlay.gameObject.SetActive(true);
+        Refresh(gameRef);
+    }
+
+    private void CloseRoster()
+    {
+        if (rosterOverlay != null) rosterOverlay.gameObject.SetActive(false);
+        if (gameRef != null) Refresh(gameRef);
+    }
+
+    private void SelectFollower(int id)
+    {
+        selectedFollowerId = id;
+        rosterDirty = true;
+        if (gameRef != null) RefreshRoster(gameRef);
+    }
+
+    private void AssignSelectedRole(ParkFollowerRole role)
+    {
+        if (gameRef == null) return;
+        if (gameRef.AssignFollowerRole(selectedFollowerId, role))
+        {
+            rosterDirty = true;
+            RefreshRoster(gameRef);
+        }
+    }
+
+    private void RefreshRoster(MourneveilParkGame game)
+    {
+        List<ParkFollower> followers = game.State.followers;
+        int count = followers == null ? 0 : followers.Count;
+        if (rosterCounter != null) rosterCounter.text = count + " VAMPIRE" + (count == 1 ? "" : "S") +
+            "  /  Train a new role for " + game.RoleCost + " Blood.";
+        if (count == 0)
+        {
+            rosterName.text = "NO VAMPIRES YET";
+            rosterStats.text = "Turn a human in the park to start your dynasty.";
+            rosterRoleInfo.text = "";
+            rosterPortrait.enabled = false;
+            rosterEmptyHint.text = "?";
+            foreach (Button roleButton in roleButtons) roleButton.interactable = false;
+            return;
+        }
+        if (game.GetFollower(selectedFollowerId) == null)
+        {
+            selectedFollowerId = followers[0].id;
+            rosterDirty = true;
+        }
+        if (rosterDirty || count != rosterCachedCount)
+        {
+            RebuildRosterRows(followers);
+            rosterCachedCount = count;
+            rosterDirty = false;
+        }
+        ParkFollower chosen = game.GetFollower(selectedFollowerId);
+        if (chosen == null) return;
+        rosterName.text = "#" + chosen.id + "   " + chosen.title.ToUpperInvariant();
+        rosterStats.text =
+            "CURRENT ROLE: " + chosen.role.ToString().ToUpperInvariant() + "\n\n" +
+            "Strength       " + chosen.strength + "\n" +
+            "Intelligence   " + chosen.intelligence + "\n" +
+            "Stealth          " + chosen.stealth + "\n" +
+            "Willpower      " + chosen.willpower + "\n" +
+            "Fear              " + chosen.fear + "\n\n" +
+            "Hunter base: +" + chosen.bloodPerSecond.ToString("0.00") + " Blood/sec";
+        Sprite portrait = SpriteForAppearance(chosen.appearanceIndex);
+        rosterPortrait.sprite = portrait;
+        rosterPortrait.enabled = portrait != null;
+        rosterEmptyHint.text = portrait != null ? "" : "VAMPIRE\n#" + chosen.id;
+        for (int i = 0; i < roleButtons.Length; i++)
+        {
+            ParkFollowerRole role = (ParkFollowerRole)i;
+            roleButtons[i].interactable = game.CanAssignRole(selectedFollowerId, role);
+            Image img = roleButtons[i].GetComponent<Image>();
+            if (img != null)
+                img.color = chosen.role == role
+                    ? new Color(0.48f, 0.18f, 0.21f, 1f)
+                    : new Color(0.32f, 0.065f, 0.13f, 0.97f);
+        }
+        rosterRoleInfo.text = chosen.role == ParkFollowerRole.Hunter
+            ? "HUNTER: Produces +" + chosen.bloodPerSecond.ToString("0.00") +
+              " Blood/sec, boosted by Scholars."
+            : chosen.role == ParkFollowerRole.Spy
+                ? "SPY: Speeds up passive Suspicion decay. Extra decay: " +
+                  game.SpySuspicionDecay.ToString("0.00") + "/sec (all Spies)."
+                : chosen.role == ParkFollowerRole.Scholar
+                    ? "SCHOLAR: Boosts all Blood/sec (+" +
+                      (game.ScholarBonus * 100f).ToString("0") +
+                      "% total) and improves Turning Chance."
+                    : "GUARDIAN: Reduces Suspicion gains by " +
+                      (game.GuardianProtection * 100f).ToString("0") + "% (all Guardians).";
+        rosterRoleInfo.text += "\nRole changes cost " + game.RoleCost + " Blood. The current role is highlighted.";
+    }
+
+    private Sprite SpriteForAppearance(int index)
+    {
+        if (index == 0) return studentSprite;
+        if (index == 1) return guardSprite;
+        return wandererSprite;
+    }
+
+    private void RebuildRosterRows(List<ParkFollower> followers)
+    {
+        for (int i = rosterListContent.childCount - 1; i >= 0; i--)
+            Destroy(rosterListContent.GetChild(i).gameObject);
+        foreach (ParkFollower ally in followers)
+        {
+            if (ally == null) continue;
+            int id = ally.id; // Stable identity, not a list index.
+            RectTransform row = NewRect("Vampire #" + id, rosterListContent);
+            LayoutElement size = row.gameObject.AddComponent<LayoutElement>();
+            size.preferredHeight = 78f;
+            Image background = row.gameObject.AddComponent<Image>();
+            background.color = id == selectedFollowerId
+                ? new Color(0.41f, 0.13f, 0.20f, 1f)
+                : new Color(0.16f, 0.075f, 0.12f, 1f);
+            Button button = row.gameObject.AddComponent<Button>();
+            button.onClick.AddListener(() => SelectFollower(id));
+            TMP_Text label = AddText("Name and Role", row,
+                "#" + id + "  " + ally.title + "\n" + ally.role.ToString().ToUpperInvariant(),
+                20, ivory, TextAlignmentOptions.Left);
+            label.rectTransform.anchorMin = Vector2.zero;
+            label.rectTransform.anchorMax = Vector2.one;
+            label.rectTransform.offsetMin = new Vector2(16f, 5f);
+            label.rectTransform.offsetMax = new Vector2(-12f, -5f);
+        }
     }
 
     private MourneveilParkWalker CreateWalker(RectTransform parent, Sprite sprite, int index,
@@ -329,6 +655,7 @@ public class MourneveilParkUI : MonoBehaviour
     private void Update()
     {
         if (!built || gameRef == null || player == null) return;
+        if ((rosterOverlay != null && rosterOverlay.gameObject.activeSelf) || IsOutcomeVisible) return;
         if (!MourneveilParkPlayer.InteractJustPressed()) return;
         if (gameRef.State.currentHuman != null || gameRef.HuntersAlerted) return;
 
@@ -353,7 +680,7 @@ public class MourneveilParkUI : MonoBehaviour
     // Clicking a passerby just marks them: no ranged hunting shortcut.
     private void MarkWalker(int index)
     {
-        if (gameRef == null || gameRef.State.currentHuman != null || gameRef.HuntersAlerted) return;
+        if (gameRef == null || gameRef.State.currentHuman != null || gameRef.HuntersAlerted || IsOutcomeVisible) return;
         markedWalker = index;
     }
 

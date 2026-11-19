@@ -182,11 +182,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7d15b3ecb3b645a4687d79e1b84e92b9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MourneveilParkUI
-  studentSprite: {fileID: 3187897938597245402, guid: 958707425e1208a49bfbc4814d3b1d02, type: 3}
-  guardSprite: {fileID: 8068545390322755795, guid: d7758a157f5f79e4abbe36d50dc97f17, type: 3}
-  wandererSprite: {fileID: 4222152913772123652, guid: 11489aee9f92d7f4aa05999cdd1fb18b, type: 3}
-  lucienSprite: {fileID: -5343830458885399943, guid: a51870dcf67166d4384207bfeb752967, type: 3}
+  studentSprite: {fileID: -3579777488231295888, guid: 15f7e06c07d057a4fb44859cabe8e25d, type: 3}
+  guardSprite: {fileID: 3563491476482693092, guid: 72e9745a2b67be34cb6146ab9d87dde4, type: 3}
+  wandererSprite: {fileID: -7613933483152721695, guid: 7becd7e94c1c29c47b5bbd13b99f1847, type: 3}
+  lucienSprite: {fileID: -6289992135921894308, guid: 173e500756498b34990049d4ee981302, type: 3}
   interactionRange: 100
+  detectionDifficulty: 1
+  sneakDetectionMultiplier: 0.22
+  showHuntOutcomePopup: 1
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
