@@ -14,6 +14,8 @@ public class ParkHuman
     public int intelligence;
     public int stealth;
     public int bloodYield;
+    // v0.2 visual variant; old v0.1 saves default to 0 and remain readable.
+    public int appearanceIndex = 0;
 }
 
 [Serializable]
@@ -46,13 +48,6 @@ public class MourneveilParkGame : MonoBehaviour
 {
     private const string SaveFile = "mourneveil_park_v1.json";
     private const float TurnSoulCost = 18f;
-    private static readonly string[] People =
-    {
-        "A lone walker", "A night-shift nurse", "A tired student",
-        "A security guard", "A lost traveller", "A late-night runner",
-        "A young researcher", "A solitary musician"
-    };
-
     [Header("Optional background (can be added later)")]
     [SerializeField] private Sprite parkBackground;
 
@@ -147,10 +142,23 @@ public class MourneveilParkGame : MonoBehaviour
 
     public void FindHuman()
     {
+        FindHuman(UnityEngine.Random.Range(0, 3));
+    }
+
+    // Visual park: choose a real passerby from the world.
+    public void FindHuman(int appearanceIndex)
+    {
         if (state.currentHuman != null || HuntersAlerted) return;
+        int chosen = Mathf.Clamp(appearanceIndex, 0, 2);
+        string[] names = chosen == 0
+            ? new [] { "A tired student", "A young researcher", "A night-shift nurse" }
+            : chosen == 1
+                ? new [] { "A security guard", "A lost traveller" }
+                : new [] { "A lone walker", "A late-night runner", "A solitary musician" };
         state.currentHuman = new ParkHuman
         {
-            title = People[UnityEngine.Random.Range(0, People.Length)],
+            appearanceIndex = chosen,
+            title = names[UnityEngine.Random.Range(0, names.Length)],
             willpower = UnityEngine.Random.Range(15, 96),
             fear = UnityEngine.Random.Range(10, 96),
             strength = UnityEngine.Random.Range(15, 96),

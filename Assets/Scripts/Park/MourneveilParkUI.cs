@@ -4,32 +4,50 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// Prototype UI is assembled at runtime; no Editor scripts or prefab references needed.
+// Mourneveil Park v0.3: controllable Lucien and proximity hunting over v0.1 economy.
+// Generates its UI at runtime; no prefabs or editor scripts are required.
 [DisallowMultipleComponent]
 public class MourneveilParkUI : MonoBehaviour
 {
-    private readonly Color ivory = new Color(0.94f, 0.85f, 0.80f);
-    private readonly Color muted = new Color(0.71f, 0.58f, 0.58f);
-    private readonly Color panel = new Color(0.085f, 0.034f, 0.055f, 0.96f);
-    private readonly Color border = new Color(0.41f, 0.22f, 0.26f);
+    [Header("v0.2 - assign optional passerby PNG sprites (Student, Guard, Wanderer)")]
+    [SerializeField] private Sprite studentSprite;
+    [SerializeField] private Sprite guardSprite;
+    [SerializeField] private Sprite wandererSprite;
+    [Header("v0.3 - Lucien controllable avatar (optional sprite)")]
+    [SerializeField] private Sprite lucienSprite;
+    [SerializeField, Range(55f, 160f)] private float interactionRange = 100f;
 
-    private RectTransform root;
+    private readonly Color ivory = new Color(0.94f, 0.85f, 0.80f);
+    private readonly Color muted = new Color(0.73f, 0.60f, 0.61f);
+    private readonly Color panel = new Color(0.085f, 0.034f, 0.055f, 0.96f);
+    private readonly Color border = new Color(0.56f, 0.27f, 0.32f);
+
     private TMP_Text bloodText, humanityText, soulText, suspicionText;
     private TMP_Text encounterTitleText, encounterStatsText, encounterHintText;
     private TMP_Text networkText, allyText, resultText, warningText;
     private TMP_Text networkButtonLabel, layLowButtonLabel;
-    private Button findButton, leaveButton, smallButton, eraseButton, drainButton, turnButton;
+    private Button leaveButton, smallButton, eraseButton, drainButton, turnButton;
     private Button networkButton, layLowButton;
+    private readonly MourneveilParkWalker[] walkers = new MourneveilParkWalker[3];
+    private MourneveilParkPlayer player;
+    private MourneveilParkGame gameRef;
+    private TMP_Text nearbyHintText;
+    private int markedWalker = -1;
+    private int lastEngagedWalker = -1;
+    private int lastResolvedCount;
     private bool built;
 
     public void Build(MourneveilParkGame game)
     {
         if (built) return;
+        gameRef = game;
+        lastResolvedCount = game.State.encountersResolved;
         Canvas canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null)
         {
-            GameObject canvasGO = new GameObject("ParkCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-            canvas = canvasGO.GetComponent<Canvas>();
+            GameObject go = new GameObject("ParkCanvas", typeof(RectTransform), typeof(Canvas),
+                typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         }
         CanvasScaler scaler = canvas.GetComponent<CanvasScaler>();
@@ -40,78 +58,126 @@ public class MourneveilParkUI : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
         if (canvas.GetComponent<GraphicRaycaster>() == null)
             canvas.gameObject.AddComponent<GraphicRaycaster>();
-
-        // If buttons do not respond, create UI > Button once in the editor to add an
-        // EventSystem compatible with your project's chosen Input System.
         if (EventSystem.current == null)
-            Debug.LogWarning("[Mourneveil Park] No EventSystem found. Add GameObject > UI > Event System to the Park scene if buttons do not respond.");
+            Debug.LogWarning("[Mourneveil Park] Add UI > Event System to the scene if buttons do not respond.");
 
-        root = NewRect("Park_Runtime_UI", canvas.transform);
+        RectTransform root = NewRect("Park_Runtime_UI_v03", canvas.transform);
         Stretch(root);
 
-        Image bg = AddImage("Park Background", root, Color.black);
-        Stretch((RectTransform)bg.transform);
-        bg.sprite = game.Background;
+        // Fullscreen backdrop + shade; the clear version is visible in the park window.
+        Image fullBg = AddImage("Fullscreen Park Backdrop", root, Color.white);
+        Stretch((RectTransform)fullBg.transform);
+        fullBg.sprite = game.Background;
+        fullBg.type = Image.Type.Simple;
+        fullBg.color = game.Background == null ? new Color(0.11f, 0.07f, 0.11f) : Color.white;
+        Image globalShade = AddImage("Fullscreen Dark Tint", root, new Color(0.025f, 0.008f, 0.018f, 0.83f));
+        Stretch((RectTransform)globalShade.transform);
+
+        TMP_Text title = AddText("Title", root, "MOURNEVEIL   /   CHAPTER II : THE FIRST HUNT",
+            37, ivory, TextAlignmentOptions.Left);
+        Place(title.rectTransform, 55, 18, 1780, 55);
+        TMP_Text subtitle = AddText("Subtitle", root,
+            "The city sleeps. Its heartbeats do not.", 23, muted, TextAlignmentOptions.Left);
+        Place(subtitle.rectTransform, 56, 76, 1750, 35);
+
+        bloodText = StatBox(root, "Blood", 55);
+        humanityText = StatBox(root, "Humanity", 516);
+        soulText = StatBox(root, "Soul Integrity", 977);
+        suspicionText = StatBox(root, "Suspicion", 1438);
+
+        // Playable UI-space park. The player must approach an NPC and press E.
+        RectTransform world = Frame("Moonlit Park", root, 55, 239, 1165, 486);
+        world.gameObject.AddComponent<RectMask2D>();
+        Image parkImage = AddImage("Park Artwork", world, Color.white);
         if (game.Background != null)
         {
-            bg.type = Image.Type.Simple;
-            bg.preserveAspect = false;  // Fill whole screen; replace with a fitted asset later.
-            bg.color = new Color(0.60f, 0.60f, 0.60f, 1f);
+            float aspect = game.Background.rect.width / game.Background.rect.height;
+            float artworkHeight = Mathf.Max(486f, 1165f / aspect);
+            Place(parkImage.rectTransform, 0f, (486f - artworkHeight) * 0.5f, 1165f, artworkHeight);
+            parkImage.sprite = game.Background;
+            parkImage.preserveAspect = false;
+            parkImage.color = new Color(0.88f, 0.83f, 0.85f, 1f);
         }
-        AddImage("Background shade", root, new Color(0.045f, 0.018f, 0.032f, 0.66f));
-        Stretch((RectTransform)root.Find("Background shade"));
+        else
+        {
+            Stretch(parkImage.rectTransform);
+            parkImage.color = new Color(0.16f, 0.10f, 0.13f, 1f);
+        }
+        Image horizon = AddImage("Horizon Shade", world, new Color(0.05f, 0.014f, 0.03f, 0.12f));
+        Stretch(horizon.rectTransform);
+        TMP_Text worldCaption = AddText("World Caption", world,
+            "MOURNEVEIL PARK   /   AFTER MIDNIGHT", 20, ivory, TextAlignmentOptions.Left);
+        Place(worldCaption.rectTransform, 18, 15, 470, 30);
+        TMP_Text controls = AddText("Controls", world,
+            "WASD MOVE  |  SHIFT RUN  |  CTRL SNEAK  |  E HUNT", 17, ivory,
+            TextAlignmentOptions.Right);
+        Place(controls.rectTransform, 500, 18, 640, 33);
 
-        TMP_Text title = AddText("Title", root, "MOURNEVEIL  /  CHAPTER II: THE FIRST HUNT", 39, ivory, TextAlignmentOptions.Left);
-        Place((RectTransform)title.transform, 62, 28, 1770, 65);
-        TMP_Text subtitle = AddText("Subtitle", root, "The living city does not know you have returned.", 24, muted, TextAlignmentOptions.Left);
-        Place((RectTransform)subtitle.transform, 65, 92, 1750, 40);
+        player = CreatePlayer(world);
+        Sprite[] sprites = { studentSprite, guardSprite, wandererSprite };
+        float[] positionsX = { -355f, -20f, 328f };
+        float[] speeds = { 0.64f, 0.48f, 0.54f };
+        for (int i = 0; i < 3; i++)
+        {
+            int index = i;
+            walkers[i] = CreateWalker(world, sprites[i], index,
+                positionsX[i], 225f + i * 8f, speeds[i], () => MarkWalker(index), player);
+        }
+        player.transform.SetAsLastSibling();
+        nearbyHintText = AddText("Park Action Prompt", world,
+            "Approach a passerby. Press E when close enough.",
+            21, ivory, TextAlignmentOptions.Center);
+        Place(nearbyHintText.rectTransform, 155, 440, 855, 33);
 
-        bloodText = StatBox("Blood", 60);
-        humanityText = StatBox("Humanity", 515);
-        soulText = StatBox("Soul Integrity", 970);
-        suspicionText = StatBox("Suspicion", 1425);
+        // A single encounter panel is below the world. Nothing blocks walking in the park.
+        RectTransform actions = Frame("Hunt Actions", root, 55, 742, 1165, 281);
+        encounterTitleText = AddText("Selected Person", actions,
+            "MOVE CLOSE TO A PASSERBY AND PRESS E", 27, ivory, TextAlignmentOptions.Left);
+        Place(encounterTitleText.rectTransform, 23, 10, 1110, 36);
+        encounterStatsText = AddText("Person Stats", actions,
+            "WASD or Arrows: move  |  Shift: run  |  Ctrl: sneak  |  E: begin encounter",
+            20, muted, TextAlignmentOptions.TopLeft);
+        Place(encounterStatsText.rectTransform, 23, 53, 1110, 58);
 
-        RectTransform left = Frame("Encounter Panel", root, 60, 270, 1080, 690);
-        TMP_Text head = AddText("Encounter Header", left, "A SHADOW IN THE PARK", 33, ivory, TextAlignmentOptions.Left);
-        Place((RectTransform)head.transform, 30, 24, 1000, 50);
-        encounterTitleText = AddText("Person", left, "No one nearby", 31, ivory, TextAlignmentOptions.Left);
-        Place((RectTransform)encounterTitleText.transform, 30, 98, 1000, 49);
-        encounterStatsText = AddText("Human Stats", left, "Find a stranger to begin your first hunt.", 26, muted, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)encounterStatsText.transform, 30, 162, 1010, 124);
+        const float bw = 360f;
+        smallButton = MakeButton(actions, "TAKE A LITTLE BLOOD", 23, 116, bw, 55, game.TakeSmallAmount);
+        eraseButton = MakeButton(actions, "FEED & ERASE MEMORY", 402, 116, bw, 55, game.FeedAndEraseMemory);
+        drainButton = MakeButton(actions, "DRAIN COMPLETELY", 781, 116, bw, 55, game.DrainHuman);
+        turnButton = MakeButton(actions, "ATTEMPT TURNING", 23, 184, bw, 55, game.AttemptTurning);
+        leaveButton = MakeButton(actions, "LET THEM GO", 402, 184, bw, 55, game.LetGo);
+        encounterHintText = AddText("Decision Hint", actions,
+            "First catch a human. The choices unlock only after pressing E nearby.",
+            18, muted, TextAlignmentOptions.Left);
+        Place(encounterHintText.rectTransform, 23, 248, 1110, 30);
 
-        findButton = MakeButton(left, "Find person", 28, 308, 495, 69, game.FindHuman);
-        leaveButton = MakeButton(left, "Let them go", 554, 308, 495, 69, game.LetGo);
-        smallButton = MakeButton(left, "Take a little blood", 28, 399, 495, 75, game.TakeSmallAmount);
-        eraseButton = MakeButton(left, "Feed & erase memory", 554, 399, 495, 75, game.FeedAndEraseMemory);
-        drainButton = MakeButton(left, "Drain completely", 28, 490, 495, 75, game.DrainHuman);
-        turnButton = MakeButton(left, "Attempt turning (18 Soul)", 554, 490, 495, 75, game.AttemptTurning);
-        encounterHintText = AddText("Risk Hint", left,
-            "Careful feeding is safer. Killing gains more Blood, but costs Humanity.",
-            21, muted, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)encounterHintText.transform, 33, 591, 1008, 75);
-
-        RectTransform right = Frame("Dynasty Panel", root, 1170, 270, 690, 690);
-        TMP_Text dynastyTitle = AddText("Dynasty Header", right, "YOUR DYNASTY", 33, ivory, TextAlignmentOptions.Left);
-        Place((RectTransform)dynastyTitle.transform, 27, 24, 630, 50);
-        TMP_Text networkDescription = AddText("Network Explanation", right,
-            "Build a discreet blood supply network. Every upgrade produces Blood automatically.",
-            24, muted, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)networkDescription.transform, 28, 102, 628, 85);
-        networkText = AddText("Supply Status", right, "", 25, ivory, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)networkText.transform, 28, 205, 625, 85);
-        networkButton = MakeButton(right, "Buy supply upgrade", 25, 302, 635, 72, game.BuySupplyNetwork);
+        RectTransform dynasty = Frame("Dynasty", root, 1240, 239, 625, 784);
+        TMP_Text dynastyTitle = AddText("Dynasty Title", dynasty, "THE DYNASTY",
+            34, ivory, TextAlignmentOptions.Left);
+        Place(dynastyTitle.rectTransform, 25, 23, 570, 49);
+        TMP_Text dynastyIntro = AddText("Dynasty Intro", dynasty,
+            "Build a discreet network while the hunters sleep.", 22, muted,
+            TextAlignmentOptions.TopLeft);
+        Place(dynastyIntro.rectTransform, 25, 88, 580, 66);
+        networkText = AddText("Production", dynasty, "", 27, ivory,
+            TextAlignmentOptions.TopLeft);
+        Place(networkText.rectTransform, 25, 166, 580, 78);
+        networkButton = MakeButton(dynasty, "UPGRADE SUPPLY NETWORK", 23, 267, 578, 68, game.BuySupplyNetwork);
         networkButtonLabel = networkButton.GetComponentInChildren<TextMeshProUGUI>();
-        allyText = AddText("Allies", right, "", 25, ivory, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)allyText.transform, 27, 400, 629, 112);
-        warningText = AddText("Hunter Warning", right, "", 22, muted, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)warningText.transform, 28, 523, 630, 62);
-        layLowButton = MakeButton(right, "Lay low", 26, 601, 310, 65, game.LayLow);
+        allyText = AddText("Allies", dynasty, "", 24, ivory, TextAlignmentOptions.TopLeft);
+        Place(allyText.rectTransform, 25, 358, 570, 85);
+        warningText = AddText("Hunter Warning", dynasty, "", 21, muted,
+            TextAlignmentOptions.TopLeft);
+        Place(warningText.rectTransform, 25, 467, 574, 66);
+        layLowButton = MakeButton(dynasty, "LAY LOW", 25, 550, 277, 61, game.LayLow);
         layLowButtonLabel = layLowButton.GetComponentInChildren<TextMeshProUGUI>();
-        MakeButton(right, "Save progress", 352, 601, 308, 65, game.SaveNow);
+        MakeButton(dynasty, "SAVE PROGRESS", 317, 550, 284, 61, game.SaveNow);
+        TMP_Text logTitle = AddText("Log Header", dynasty, "NIGHT LOG", 24,
+            ivory, TextAlignmentOptions.Left);
+        Place(logTitle.rectTransform, 25, 645, 570, 38);
+        resultText = AddText("Latest Outcome", dynasty, "", 21,
+            muted, TextAlignmentOptions.TopLeft);
+        Place(resultText.rectTransform, 25, 685, 570, 84);
 
-        RectTransform result = Frame("Story Log", root, 60, 977, 1800, 77);
-        resultText = AddText("Latest Outcome", result, "", 24, ivory, TextAlignmentOptions.MidlineLeft);
-        Place((RectTransform)resultText.transform, 22, 5, 1750, 68);
         built = true;
     }
 
@@ -124,111 +190,275 @@ public class MourneveilParkUI : MonoBehaviour
         soulText.text = "SOUL INTEGRITY\n" + state.soulIntegrity.ToString("0") + "%";
         suspicionText.text = "SUSPICION\n" + state.suspicion.ToString("0") + "%";
 
-        ParkHuman human = state.currentHuman;
-        bool engaged = human != null;
+        ParkHuman person = state.currentHuman;
+        bool engaged = person != null;
         if (engaged)
         {
-            encounterTitleText.text = human.title;
+            encounterTitleText.text = person.title.ToUpperInvariant();
             encounterStatsText.text =
-                "Willpower: " + human.willpower + "     Fear: " + human.fear + "     Strength: " + human.strength + "\n" +
-                "Intelligence: " + human.intelligence + "     Stealth: " + human.stealth + "     Blood: ~" + human.bloodYield + "\n" +
-                "Estimated turning chance: " + game.TurningChance.ToString("0") + "%";
+                "Willpower: " + person.willpower + "     Fear: " + person.fear +
+                "     Strength: " + person.strength + "     Blood: ~" + person.bloodYield + "\n" +
+                "Intelligence: " + person.intelligence + "     Stealth: " + person.stealth +
+                "     Turning chance: " + game.TurningChance.ToString("0") + "%";
         }
         else
         {
-            encounterTitleText.text = game.HuntersAlerted ? "The hunters are watching!" : "No one nearby";
+            encounterTitleText.text = game.HuntersAlerted ? "HUNTERS ARE WATCHING" : "NO TARGET SELECTED";
             encounterStatsText.text = game.HuntersAlerted
                 ? "Your presence is exposed. Lay low or wait for Suspicion to decrease."
-                : "Find a stranger to choose how Lucien gathers Blood.";
+                : "Walk around with WASD. Approach a person and press E to start the hunt.";
         }
-
-        findButton.interactable = !engaged && !game.HuntersAlerted;
+        if (engaged) lastEngagedWalker = Mathf.Clamp(person.appearanceIndex, 0, 2);
+        else if (state.encountersResolved != lastResolvedCount)
+        {
+            if (lastEngagedWalker >= 0 && lastEngagedWalker < walkers.Length)
+                walkers[lastEngagedWalker].BeginRespawn();
+            lastEngagedWalker = -1;
+            markedWalker = -1;
+        }
+        lastResolvedCount = state.encountersResolved;
+        player.SetEncounterActive(engaged);
+        for (int i = 0; i < walkers.Length; i++)
+        {
+            if (walkers[i] != null)
+            {
+                walkers[i].SetState(engaged && person.appearanceIndex == i,
+                    engaged || game.HuntersAlerted);
+                walkers[i].SetMarked(!engaged && markedWalker == i);
+            }
+        }
+        UpdateNearbyHint(game, engaged);
         leaveButton.interactable = engaged && !game.HuntersAlerted;
         smallButton.interactable = engaged && !game.HuntersAlerted;
         eraseButton.interactable = engaged && !game.HuntersAlerted;
         drainButton.interactable = engaged && !game.HuntersAlerted;
         turnButton.interactable = engaged && !game.HuntersAlerted && state.soulIntegrity >= game.TurnCost;
         networkButton.interactable = state.blood >= game.NetworkUpgradeCost;
-        layLowButton.interactable = state.suspicion > 0f && !engaged && game.LayLowCooldown <= 0f;
-        layLowButtonLabel.text = game.LayLowCooldown > 0f ? "Lay low (" + Mathf.CeilToInt(game.LayLowCooldown) + "s)" : "Lay low (-25 Suspicion)";
+        layLowButton.interactable = state.suspicion > 0 && !engaged && game.LayLowCooldown <= 0;
+        layLowButtonLabel.text = game.LayLowCooldown > 0
+            ? "LAY LOW (" + Mathf.CeilToInt(game.LayLowCooldown) + "s)"
+            : "LAY LOW (-25 SUSPICION)";
 
         networkText.text = "Supply routes: Lv. " + state.supplyNetworkLevel +
             "\nPassive Blood: +" + game.BloodPerSecond.ToString("0.00") + "/sec";
-        networkButtonLabel.text = "Upgrade supply network  —  " + game.NetworkUpgradeCost + " Blood";
-        int count = state.followers == null ? 0 : state.followers.Count;
-        allyText.text = "Vampiric allies: " + count +
-            "\nSuccessfully turned allies also produce Blood automatically.";
+        networkButtonLabel.text = "UPGRADE SUPPLY  -  " + game.NetworkUpgradeCost + " BLOOD";
+        int allies = state.followers == null ? 0 : state.followers.Count;
+        allyText.text = "Vampiric allies: " + allies +
+            "\nAllies also gather Blood automatically.";
         warningText.text = game.HuntersAlerted
-            ? "HUNTER ALERT! Hunting is blocked until Suspicion falls."
-            : (state.humanity < 35f
-                ? "Your instincts grow violent: each hunt raises extra Suspicion."
-                : "Low Humanity makes hunting harder. Soul can be restored in a later rebirth system.");
+            ? "HUNTER ALERT! Hunting blocked until Suspicion falls."
+            : (state.humanity < 35
+                ? "Low Humanity: every hunt increases extra Suspicion."
+                : "Stay discreet. A high Suspicion attracts hunters.");
         encounterHintText.text = engaged
-            ? "Small feeding: +" + human.bloodYield + " Blood, moderate risk.  Memory erase: +" + Mathf.Max(3, human.bloodYield-5) + " Blood, low risk.\n" +
-              "Drain: +" + human.bloodYield * 3 + " Blood, -15 Humanity.  Turn: -18 Soul, chance " + game.TurningChance.ToString("0") + "%."
-            : "There is no perfect way to survive. Every choice shapes the dynasty you rebuild.";
-        resultText.text = "NIGHT LOG  •  " + state.lastMessage;
+            ? "Take +" + person.bloodYield + " Blood | Erase +" + Mathf.Max(3, person.bloodYield - 5) +
+              " | Drain +" + (person.bloodYield * 3) + " (-15 Humanity) | Turn costs " +
+              game.TurnCost.ToString("0") + " Soul."
+            : "Catch someone first. Sneaking lets Lucien approach without triggering flight.";
+        resultText.text = state.lastMessage;
     }
 
-    private TMP_Text StatBox(string name, float x)
+    private MourneveilParkWalker CreateWalker(RectTransform parent, Sprite sprite, int index,
+        float centerX, float bottomY, float speed, Action onClick, MourneveilParkPlayer controller)
     {
-        RectTransform panelRect = Frame(name + " frame", root, x, 150, 430, 96);
-        TMP_Text label = AddText(name + " label", panelRect, name, 25, ivory, TextAlignmentOptions.TopLeft);
-        Place((RectTransform)label.transform, 17, 10, 408, 80);
-        return label;
+        RectTransform rect = NewRect("Passerby_" + (index + 1), parent);
+        rect.anchorMin = new Vector2(0.5f, 0f);
+        rect.anchorMax = new Vector2(0.5f, 0f);
+        rect.pivot = new Vector2(0.5f, 0f);
+        rect.anchoredPosition = new Vector2(centerX, bottomY);
+        rect.sizeDelta = new Vector2(98, 175);
+        Image graphic = rect.gameObject.AddComponent<Image>();
+        graphic.sprite = sprite;
+        graphic.preserveAspect = sprite != null;
+        graphic.color = sprite == null ? new Color(0.18f, 0.09f, 0.15f, 0.94f) : Color.white;
+        Button button = rect.gameObject.AddComponent<Button>();
+        button.transition = Selectable.Transition.None;
+        button.onClick.AddListener(() => onClick());
+        if (sprite == null)
+        {
+            TMP_Text fallback = AddText("PLACEHOLDER", rect, "?", 50, ivory, TextAlignmentOptions.Center);
+            Stretch(fallback.rectTransform);
+        }
+        TMP_Text hover = AddText("Hover Label", rect, "STALK", 17, ivory, TextAlignmentOptions.Center);
+        RectTransform hoverRect = hover.rectTransform;
+        hoverRect.anchorMin = new Vector2(0.5f, 0f);
+        hoverRect.anchorMax = new Vector2(0.5f, 0f);
+        hoverRect.pivot = new Vector2(0.5f, 0f);
+        hoverRect.anchoredPosition = new Vector2(0, 175);
+        hoverRect.sizeDelta = new Vector2(122, 22);
+        MourneveilParkWalker motion = rect.gameObject.AddComponent<MourneveilParkWalker>();
+        motion.Initialize(graphic, button, hover, new Vector2(centerX, bottomY), speed, index, controller);
+        return motion;
+    }
+
+    private void Update()
+    {
+        if (!built || gameRef == null || player == null) return;
+        if (!MourneveilParkPlayer.InteractJustPressed()) return;
+        if (gameRef.State.currentHuman != null || gameRef.HuntersAlerted) return;
+
+        int nearest = FindNearestAvailableWalker(out float distance);
+        if (nearest >= 0 && distance <= interactionRange)
+        {
+            markedWalker = -1;
+            gameRef.FindHuman(nearest); // The ONLY UI route into a new encounter.
+        }
+    }
+
+    // Clicking a passerby just marks them: no ranged hunting shortcut.
+    private void MarkWalker(int index)
+    {
+        if (gameRef == null || gameRef.State.currentHuman != null || gameRef.HuntersAlerted) return;
+        markedWalker = index;
+    }
+
+    private int FindNearestAvailableWalker(out float distance)
+    {
+        int bestIndex = -1;
+        distance = float.PositiveInfinity;
+        if (player == null) return -1;
+        for (int i = 0; i < walkers.Length; i++)
+        {
+            MourneveilParkWalker npc = walkers[i];
+            if (npc == null || !npc.IsAvailable) continue;
+            float d = Vector2.Distance(player.ParkPosition, npc.ParkPosition);
+            if (d < distance)
+            {
+                distance = d;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private void UpdateNearbyHint(MourneveilParkGame game, bool engaged)
+    {
+        if (nearbyHintText == null) return;
+        if (engaged)
+        {
+            nearbyHintText.text = "THE HUNT  /  Choose what Lucien will do below.";
+            return;
+        }
+        if (game.HuntersAlerted)
+        {
+            nearbyHintText.text = "HUNTERS ARE ALERT. Lay low before hunting again.";
+            return;
+        }
+        int closest = FindNearestAvailableWalker(out float distance);
+        if (closest < 0)
+        {
+            nearbyHintText.text = "The path is empty. Wait for another passerby.";
+            return;
+        }
+        if (distance <= interactionRange)
+        {
+            nearbyHintText.text = "[ E ]  INTERACT WITH PASSERBY";
+            return;
+        }
+        if (markedWalker >= 0 && walkers[markedWalker] != null && walkers[markedWalker].IsAvailable)
+        {
+            nearbyHintText.text = "TARGET MARKED  /  Follow them and press E when close.";
+            return;
+        }
+        nearbyHintText.text = player.IsSneaking
+            ? "SNEAKING  /  Keep approaching quietly."
+            : "MOVE CLOSE TO A PASSERBY  /  CTRL TO SNEAK";
+    }
+
+    private MourneveilParkPlayer CreatePlayer(RectTransform parent)
+    {
+        RectTransform root = NewRect("Lucien_Player", parent);
+        root.anchorMin = new Vector2(0.5f, 0f);
+        root.anchorMax = new Vector2(0.5f, 0f);
+        root.pivot = new Vector2(0.5f, 0f);
+        root.sizeDelta = new Vector2(100f, 164f);
+        root.anchoredPosition = new Vector2(0f, 65f);
+
+        Image shadow = AddImage("Player Ground Shadow", root, new Color(0.08f, 0.0f, 0.04f, 0.56f));
+        shadow.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        shadow.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        shadow.rectTransform.pivot = new Vector2(0.5f, 0f);
+        shadow.rectTransform.anchoredPosition = Vector2.zero;
+        shadow.rectTransform.sizeDelta = new Vector2(90f, 13f);
+
+        Image spriteImage = AddImage("Lucien Sprite", root, Color.white);
+        spriteImage.sprite = lucienSprite;
+        spriteImage.preserveAspect = true;
+        spriteImage.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        spriteImage.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        spriteImage.rectTransform.pivot = new Vector2(0.5f, 0f);
+        spriteImage.rectTransform.anchoredPosition = Vector2.zero;
+        spriteImage.rectTransform.sizeDelta = new Vector2(95f, 162f);
+        if (lucienSprite == null) spriteImage.color = new Color(0.16f, 0.09f, 0.18f, 1f);
+
+        TMP_Text name = AddText("Player Label", root, "LUCIEN", 18, ivory, TextAlignmentOptions.Center);
+        name.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        name.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        name.rectTransform.pivot = new Vector2(0.5f, 0f);
+        name.rectTransform.anchoredPosition = new Vector2(0f, 163f);
+        name.rectTransform.sizeDelta = new Vector2(120f, 30f);
+        MourneveilParkPlayer controller = root.gameObject.AddComponent<MourneveilParkPlayer>();
+        controller.Initialize(spriteImage, new Vector2(0f, 65f));
+        return controller;
+    }
+
+    private TMP_Text StatBox(Transform parent, string name, float x)
+    {
+        RectTransform frame = Frame(name + " Box", parent, x, 123, 425, 93);
+        TMP_Text text = AddText(name + " Text", frame, name, 24, ivory, TextAlignmentOptions.TopLeft);
+        Place(text.rectTransform, 18, 9, 400, 78);
+        return text;
     }
 
     private RectTransform Frame(string name, Transform parent, float x, float y, float w, float h)
     {
         RectTransform frame = NewRect(name, parent);
         Place(frame, x, y, w, h);
-        AddImage("Frame Background", frame, panel);
-        Stretch((RectTransform)frame.Find("Frame Background"));
-        // Simple thin silver-burgundy inset border (no external assets required).
-        Image lineTop = AddImage("Top trim", frame, border);
-        Place((RectTransform)lineTop.transform, 0, 0, w, 3);
+        Image background = AddImage("Frame Background", frame, panel);
+        Stretch(background.rectTransform);
+        Image top = AddImage("Crimson Top Line", frame, border);
+        Place(top.rectTransform, 0, 0, w, 3);
         return frame;
     }
 
-    private Button MakeButton(Transform parent, string caption, float x, float y, float w, float h, UnityEngine.Events.UnityAction action)
+    private Button MakeButton(Transform parent, string caption, float x, float y,
+        float w, float h, UnityEngine.Events.UnityAction action)
     {
         RectTransform rect = NewRect(caption, parent);
         Place(rect, x, y, w, h);
-        Image image = rect.gameObject.AddComponent<Image>();
-        image.color = new Color(0.28f, 0.065f, 0.11f, 0.98f);
+        Image img = rect.gameObject.AddComponent<Image>();
+        img.color = new Color(0.32f, 0.065f, 0.13f, 0.97f);
         Button button = rect.gameObject.AddComponent<Button>();
-        ColorBlock palette = button.colors;
-        palette.normalColor = Color.white;
-        palette.highlightedColor = new Color(1.17f, 1.07f, 1.07f);
-        palette.pressedColor = new Color(0.68f, 0.58f, 0.58f);
-        palette.disabledColor = new Color(0.36f, 0.36f, 0.36f, 0.58f);
-        palette.colorMultiplier = 1f;
-        palette.fadeDuration = 0.12f;
-        button.colors = palette;
-        button.transition = Selectable.Transition.ColorTint;
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1.20f, 1.10f, 1.10f);
+        colors.pressedColor = new Color(0.68f, 0.52f, 0.58f);
+        colors.disabledColor = new Color(0.28f, 0.27f, 0.27f, 0.55f);
+        colors.fadeDuration = 0.12f;
+        button.colors = colors;
         button.onClick.AddListener(action);
-        TMP_Text text = AddText("Label", rect, caption, 23, ivory, TextAlignmentOptions.Center);
-        Stretch((RectTransform)text.transform);
-        text.raycastTarget = false;
+        TMP_Text captionText = AddText("Caption", rect, caption, 21, ivory, TextAlignmentOptions.Center);
+        Stretch(captionText.rectTransform);
         return button;
     }
 
-    private TMP_Text AddText(string name, Transform parent, string value, int fontSize, Color color, TextAlignmentOptions alignment)
+    private TMP_Text AddText(string name, Transform parent, string value, int size,
+        Color color, TextAlignmentOptions alignment)
     {
         RectTransform rect = NewRect(name, parent);
-        TextMeshProUGUI t = rect.gameObject.AddComponent<TextMeshProUGUI>();
-        if (TMP_Settings.defaultFontAsset != null) t.font = TMP_Settings.defaultFontAsset;
-        t.fontSize = fontSize;
-        t.text = value;
-        t.color = color;
-        t.alignment = alignment;
-        t.textWrappingMode = TextWrappingModes.Normal;
-        t.overflowMode = TextOverflowModes.Truncate;
-        t.raycastTarget = false;
-        return t;
+        TextMeshProUGUI tmp = rect.gameObject.AddComponent<TextMeshProUGUI>();
+        if (TMP_Settings.defaultFontAsset != null) tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.text = value;
+        tmp.fontSize = size;
+        tmp.color = color;
+        tmp.alignment = alignment;
+        tmp.textWrappingMode = TextWrappingModes.Normal; // Current TMPro API.
+        tmp.overflowMode = TextOverflowModes.Truncate;
+        tmp.raycastTarget = false;
+        return tmp;
     }
 
-    private Image AddImage(string name, Transform parent, Color color)
+    private static Image AddImage(string name, Transform parent, Color color)
     {
         RectTransform rect = NewRect(name, parent);
         Image image = rect.gameObject.AddComponent<Image>();
@@ -253,12 +483,12 @@ public class MourneveilParkUI : MonoBehaviour
         rect.offsetMax = Vector2.zero;
     }
 
-    private static void Place(RectTransform rect, float x, float y, float width, float height)
+    private static void Place(RectTransform rect, float x, float y, float w, float h)
     {
         rect.anchorMin = new Vector2(0, 1);
         rect.anchorMax = new Vector2(0, 1);
         rect.pivot = new Vector2(0, 1);
         rect.anchoredPosition = new Vector2(x, -y);
-        rect.sizeDelta = new Vector2(width, height);
+        rect.sizeDelta = new Vector2(w, h);
     }
 }
