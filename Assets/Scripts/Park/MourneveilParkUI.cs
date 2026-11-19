@@ -4,7 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// Mourneveil Park v0.3: controllable Lucien and proximity hunting over v0.1 economy.
+// Mourneveil Park v0.4: detection, AI reactions and stealth rewards over v0.3 movement.
 // Generates its UI at runtime; no prefabs or editor scripts are required.
 [DisallowMultipleComponent]
 public class MourneveilParkUI : MonoBehaviour
@@ -16,6 +16,9 @@ public class MourneveilParkUI : MonoBehaviour
     [Header("v0.3 - Lucien controllable avatar (optional sprite)")]
     [SerializeField] private Sprite lucienSprite;
     [SerializeField, Range(55f, 160f)] private float interactionRange = 100f;
+    [Header("v0.4 - Detection tuning")]
+    [SerializeField, Range(0.3f, 2f)] private float detectionDifficulty = 1f;
+    [SerializeField, Range(0.05f, 1f)] private float sneakDetectionMultiplier = 0.22f;
 
     private readonly Color ivory = new Color(0.94f, 0.85f, 0.80f);
     private readonly Color muted = new Color(0.73f, 0.60f, 0.61f);
@@ -61,7 +64,7 @@ public class MourneveilParkUI : MonoBehaviour
         if (EventSystem.current == null)
             Debug.LogWarning("[Mourneveil Park] Add UI > Event System to the scene if buttons do not respond.");
 
-        RectTransform root = NewRect("Park_Runtime_UI_v03", canvas.transform);
+        RectTransform root = NewRect("Park_Runtime_UI_v04", canvas.transform);
         Stretch(root);
 
         // Fullscreen backdrop + shade; the clear version is visible in the park window.
@@ -120,7 +123,10 @@ public class MourneveilParkUI : MonoBehaviour
         for (int i = 0; i < 3; i++)
         {
             int index = i;
-            walkers[i] = CreateWalker(world, sprites[i], index,
+            ParkHuman candidate = game.State.currentHuman != null &&
+                game.State.currentHuman.appearanceIndex == index
+                ? game.State.currentHuman : game.CreateHumanPreview(index);
+            walkers[i] = CreateWalker(world, sprites[i], index, candidate,
                 positionsX[i], 225f + i * 8f, speeds[i], () => MarkWalker(index), player);
         }
         player.transform.SetAsLastSibling();
@@ -199,7 +205,8 @@ public class MourneveilParkUI : MonoBehaviour
                 "Willpower: " + person.willpower + "     Fear: " + person.fear +
                 "     Strength: " + person.strength + "     Blood: ~" + person.bloodYield + "\n" +
                 "Intelligence: " + person.intelligence + "     Stealth: " + person.stealth +
-                "     Turning chance: " + game.TurningChance.ToString("0") + "%";
+                "     Turning chance: " + game.TurningChance.ToString("0") + "%" +
+                (state.currentEncounterAmbush ? "     [STEALTH AMBUSH!]" : "");
         }
         else
         {
@@ -211,8 +218,11 @@ public class MourneveilParkUI : MonoBehaviour
         if (engaged) lastEngagedWalker = Mathf.Clamp(person.appearanceIndex, 0, 2);
         else if (state.encountersResolved != lastResolvedCount)
         {
-            if (lastEngagedWalker >= 0 && lastEngagedWalker < walkers.Length)
+            if (lastEngagedWalker >= 0 && lastEngagedWalker < walkers.Length && walkers[lastEngagedWalker] != null)
+            {
                 walkers[lastEngagedWalker].BeginRespawn();
+                walkers[lastEngagedWalker].AssignHuman(game.CreateHumanPreview(lastEngagedWalker));
+            }
             lastEngagedWalker = -1;
             markedWalker = -1;
         }
@@ -251,15 +261,20 @@ public class MourneveilParkUI : MonoBehaviour
                 ? "Low Humanity: every hunt increases extra Suspicion."
                 : "Stay discreet. A high Suspicion attracts hunters.");
         encounterHintText.text = engaged
-            ? "Take +" + person.bloodYield + " Blood | Erase +" + Mathf.Max(3, person.bloodYield - 5) +
-              " | Drain +" + (person.bloodYield * 3) + " (-15 Humanity) | Turn costs " +
-              game.TurnCost.ToString("0") + " Soul."
-            : "Catch someone first. Sneaking lets Lucien approach without triggering flight.";
+            ? "Take +" + (person.bloodYield + (state.currentEncounterAmbush ?
+                  Mathf.CeilToInt(person.bloodYield * 0.25f) : 0)) +
+              " Blood | Erase +" + (Mathf.Max(3, person.bloodYield - 5) +
+                  (state.currentEncounterAmbush ? 3 : 0)) +
+              " | Drain +" + (person.bloodYield * 3) + " | Turn costs " +
+              game.TurnCost.ToString("0") + " Soul." +
+              (state.currentEncounterAmbush ? "  UNDETECTED BONUS!" : "")
+            : "Approach quietly for a stealth reward. Intelligent NPCs detect you sooner.";
         resultText.text = state.lastMessage;
     }
 
     private MourneveilParkWalker CreateWalker(RectTransform parent, Sprite sprite, int index,
-        float centerX, float bottomY, float speed, Action onClick, MourneveilParkPlayer controller)
+        ParkHuman human, float centerX, float bottomY, float speed,
+        Action onClick, MourneveilParkPlayer controller)
     {
         RectTransform rect = NewRect("Passerby_" + (index + 1), parent);
         rect.anchorMin = new Vector2(0.5f, 0f);
@@ -286,8 +301,28 @@ public class MourneveilParkUI : MonoBehaviour
         hoverRect.pivot = new Vector2(0.5f, 0f);
         hoverRect.anchoredPosition = new Vector2(0, 175);
         hoverRect.sizeDelta = new Vector2(122, 22);
+        // NPC's per-person awareness meter (appears only when Lucien is noticed).
+        Image meterBg = AddImage("Awareness Track", rect, new Color(0.10f, 0.035f, 0.065f, 0.88f));
+        meterBg.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        meterBg.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        meterBg.rectTransform.pivot = new Vector2(0.5f, 0f);
+        meterBg.rectTransform.anchoredPosition = new Vector2(0f, 206f);
+        meterBg.rectTransform.sizeDelta = new Vector2(112f, 10f);
+        Image meter = AddImage("Awareness Fill", meterBg.rectTransform, new Color(0.95f, 0.65f, 0.35f));
+        meter.rectTransform.anchorMin = new Vector2(0f, 0f);
+        meter.rectTransform.anchorMax = new Vector2(0f, 1f);
+        meter.rectTransform.offsetMin = Vector2.zero;
+        meter.rectTransform.offsetMax = Vector2.zero;
+        TMP_Text meterLabel = AddText("Awareness Label", rect, "AWARENESS", 13, ivory, TextAlignmentOptions.Center);
+        meterLabel.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        meterLabel.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+        meterLabel.rectTransform.pivot = new Vector2(0.5f, 0f);
+        meterLabel.rectTransform.anchoredPosition = new Vector2(0f, 218f);
+        meterLabel.rectTransform.sizeDelta = new Vector2(132f, 22f);
         MourneveilParkWalker motion = rect.gameObject.AddComponent<MourneveilParkWalker>();
-        motion.Initialize(graphic, button, hover, new Vector2(centerX, bottomY), speed, index, controller);
+        motion.Initialize(graphic, button, hover, meterBg, meter, meterLabel,
+            human, new Vector2(centerX, bottomY), speed, index, controller,
+            OnPasserbyDetected, detectionDifficulty, sneakDetectionMultiplier);
         return motion;
     }
 
@@ -300,9 +335,19 @@ public class MourneveilParkUI : MonoBehaviour
         int nearest = FindNearestAvailableWalker(out float distance);
         if (nearest >= 0 && distance <= interactionRange)
         {
+            MourneveilParkWalker target = walkers[nearest];
+            if (player.IsSprinting) target.ForceSpot(); // Running catches faster, but is conspicuous.
+            if (gameRef.HuntersAlerted) return;
+            bool ambush = player.IsSneaking && target.CanAmbush;
             markedWalker = -1;
-            gameRef.FindHuman(nearest); // The ONLY UI route into a new encounter.
+            gameRef.FindHuman(target.Human, ambush); // Exactly this NPC and their pre-rolled stats.
         }
+    }
+
+    private void OnPasserbyDetected(MourneveilParkWalker witness)
+    {
+        if (witness != null && gameRef != null)
+            gameRef.ReportDetection(witness.Human);
     }
 
     // Clicking a passerby just marks them: no ranged hunting shortcut.
@@ -352,7 +397,12 @@ public class MourneveilParkUI : MonoBehaviour
         }
         if (distance <= interactionRange)
         {
-            nearbyHintText.text = "[ E ]  INTERACT WITH PASSERBY";
+            MourneveilParkWalker npc = walkers[closest];
+            nearbyHintText.text = player.IsSneaking && npc.CanAmbush
+                ? "[ E ]  SILENT AMBUSH  /  BONUS BLOOD + TURN CHANCE"
+                : npc.HasSpottedLucien
+                    ? "[ E ]  CATCH THE WITNESS  /  THEY HAVE SPOTTED YOU"
+                    : "[ E ]  INTERACT  /  HOLD CTRL FOR STEALTH BONUS";
             return;
         }
         if (markedWalker >= 0 && walkers[markedWalker] != null && walkers[markedWalker].IsAvailable)

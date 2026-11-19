@@ -38,6 +38,8 @@ public class ParkProgress
     public int supplyNetworkLevel = 0;
     public int encountersResolved = 0;
     public ParkHuman currentHuman;
+    // v0.4: persisted with the active encounter; old v1 saves default to false.
+    public bool currentEncounterAmbush = false;
     public List<ParkFollower> followers = new List<ParkFollower>();
     public string lastMessage = "The park is quiet. Find someone in the shadows.";
     public long lastSavedUtcTicks = 0;
@@ -99,7 +101,8 @@ public class MourneveilParkGame : MonoBehaviour
         {
             if (state.currentHuman == null) return 0f;
             // Strong willpower makes turning harder. Other abilities are independent.
-            return Mathf.Clamp(82f - state.currentHuman.willpower * 0.65f, 12f, 80f);
+            return Mathf.Clamp(82f - state.currentHuman.willpower * 0.65f +
+                (state.currentEncounterAmbush ? 8f : 0f), 12f, 88f);
         }
     }
 
@@ -145,17 +148,23 @@ public class MourneveilParkGame : MonoBehaviour
         FindHuman(UnityEngine.Random.Range(0, 3));
     }
 
-    // Visual park: choose a real passerby from the world.
+    // Backward compatible API for existing callers. Uses the normal (noticed) encounter.
     public void FindHuman(int appearanceIndex)
     {
-        if (state.currentHuman != null || HuntersAlerted) return;
+        FindHuman(CreateHumanPreview(appearanceIndex), false);
+    }
+
+    // Generate a real character when they spawn, not when Lucien presses E.
+    // Preview does NOT affect the saved state until the player begins an encounter.
+    public ParkHuman CreateHumanPreview(int appearanceIndex)
+    {
         int chosen = Mathf.Clamp(appearanceIndex, 0, 2);
         string[] names = chosen == 0
             ? new [] { "A tired student", "A young researcher", "A night-shift nurse" }
             : chosen == 1
                 ? new [] { "A security guard", "A lost traveller" }
                 : new [] { "A lone walker", "A late-night runner", "A solitary musician" };
-        state.currentHuman = new ParkHuman
+        return new ParkHuman
         {
             appearanceIndex = chosen,
             title = names[UnityEngine.Random.Range(0, names.Length)],
@@ -166,7 +175,30 @@ public class MourneveilParkGame : MonoBehaviour
             stealth = UnityEngine.Random.Range(10, 96),
             bloodYield = UnityEngine.Random.Range(9, 17)
         };
-        state.lastMessage = "You sense a heartbeat nearby. Choose what Lucien will do.";
+    }
+
+    // Called only after Lucien reaches this NPC. The exact same generated stats
+    // are used by NPC AI and by the economy/turning calculations.
+    public void FindHuman(ParkHuman person, bool undetected)
+    {
+        if (state.currentHuman != null || HuntersAlerted || person == null) return;
+        state.currentHuman = person;
+        state.currentEncounterAmbush = undetected;
+        state.lastMessage = undetected
+            ? "You approach unseen. A perfect opening: quiet feeding and turning are easier."
+            : "You catch the stranger. They know something is wrong. Choose what Lucien will do.";
+        CommitChange();
+    }
+
+    // One world detection = one global Suspicion penalty. NPC handles the cooldown.
+    public void ReportDetection(ParkHuman witness)
+    {
+        if (state.currentHuman != null || HuntersAlerted || witness == null) return;
+        float penalty = 4f + witness.intelligence / 25f + witness.fear / 45f;
+        float before = state.suspicion;
+        RaiseSuspicion(penalty);
+        state.lastMessage = witness.title + " noticed Lucien! Suspicion +" +
+            (state.suspicion - before).ToString("0.0") + ".";
         CommitChange();
     }
 
@@ -174,21 +206,25 @@ public class MourneveilParkGame : MonoBehaviour
     {
         if (!CanAct()) return;
         ParkHuman target = state.currentHuman;
-        int gained = target.bloodYield;
+        bool ambush = state.currentEncounterAmbush;
+        int gained = target.bloodYield + (ambush ? Mathf.CeilToInt(target.bloodYield * 0.25f) : 0);
         state.blood += gained;
         state.humanity = Mathf.Max(0f, state.humanity - 1f);
-        RaiseSuspicion(5f + target.fear / 25f);
-        CompleteEncounter("You took a little blood (+" + gained + "). They will recover, but may remember your face.");
+        RaiseSuspicion((5f + target.fear / 25f) * (ambush ? 0.5f : 1f));
+        CompleteEncounter("You took a little blood (+" + gained + ")." +
+            (ambush ? " Silent approach bonus applied." : " They may remember your face."));
     }
 
     public void FeedAndEraseMemory()
     {
         if (!CanAct()) return;
         ParkHuman target = state.currentHuman;
-        int gained = Mathf.Max(3, target.bloodYield - 5);
+        bool ambush = state.currentEncounterAmbush;
+        int gained = Mathf.Max(3, target.bloodYield - 5) + (ambush ? 3 : 0);
         state.blood += gained;
-        RaiseSuspicion(2f);
-        CompleteEncounter("The human survives, confused. Their memories fade. Blood +" + gained + ".");
+        RaiseSuspicion(ambush ? 0.5f : 2f);
+        CompleteEncounter("The human survives, confused. Their memories fade. Blood +" + gained + "." +
+            (ambush ? " Silent approach bonus applied." : ""));
     }
 
     public void DrainHuman()
@@ -223,12 +259,12 @@ public class MourneveilParkGame : MonoBehaviour
                 intelligence = target.intelligence,
                 stealth = target.stealth
             });
-            RaiseSuspicion(5f);
+            RaiseSuspicion(state.currentEncounterAmbush ? 2.5f : 5f);
             CompleteEncounter("Turning succeeded! A new ally produces +" + production.ToString("0.00") + " Blood/sec.");
         }
         else
         {
-            RaiseSuspicion(18f);
+            RaiseSuspicion(state.currentEncounterAmbush ? 14f : 18f);
             CompleteEncounter("Turning failed. Your soul weakened (-18), and rumours spread through the park.");
         }
     }
@@ -276,6 +312,14 @@ public class MourneveilParkGame : MonoBehaviour
         Debug.Log("[Mourneveil Park] DEV: Progress reset (next autosave will write fresh progress).");
     }
 
+    [ContextMenu("DEV: Restore Soul Integrity")]
+    private void RestoreSoulForTesting()
+    {
+        state.soulIntegrity = 100f;
+        state.lastMessage = "DEV: Soul Integrity restored to 100.";
+        CommitChange();
+    }
+
     private bool CanAct()
     {
         return state.currentHuman != null && !HuntersAlerted;
@@ -291,6 +335,7 @@ public class MourneveilParkGame : MonoBehaviour
     private void CompleteEncounter(string message)
     {
         state.currentHuman = null;
+        state.currentEncounterAmbush = false;
         state.encountersResolved++;
         state.lastMessage = message;
         if (HuntersAlerted)
@@ -320,6 +365,7 @@ public class MourneveilParkGame : MonoBehaviour
                     state = loaded;
             }
             if (state.followers == null) state.followers = new List<ParkFollower>();
+            if (state.currentHuman == null) state.currentEncounterAmbush = false;
             state.humanity = Mathf.Clamp(state.humanity, 0f, 100f);
             state.soulIntegrity = Mathf.Clamp(state.soulIntegrity, 0f, 100f);
             state.suspicion = Mathf.Clamp(state.suspicion, 0f, 100f);
