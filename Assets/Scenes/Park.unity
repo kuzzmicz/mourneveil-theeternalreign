@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 400896999}
   - component: {fileID: 400896998}
+  - component: {fileID: 400897000}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -148,7 +149,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8e284abf73622644793faa385f9f9b33, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MourneveilParkGame
-  parkBackground: {fileID: 0}
+  parkBackground: {fileID: 7414488333095630553, guid: 13c0d18292374354dadc56be003e9755, type: 3}
   networkBaseProduction: 0.35
   networkUpgradeBaseCost: 30
   naturalSuspicionDecreasePerSecond: 0.12
@@ -169,6 +170,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &400897000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7d15b3ecb3b645a4687d79e1b84e92b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilParkUI
+  studentSprite: {fileID: 3187897938597245402, guid: 958707425e1208a49bfbc4814d3b1d02, type: 3}
+  guardSprite: {fileID: 8068545390322755795, guid: d7758a157f5f79e4abbe36d50dc97f17, type: 3}
+  wandererSprite: {fileID: 4222152913772123652, guid: 11489aee9f92d7f4aa05999cdd1fb18b, type: 3}
+  lucienSprite: {fileID: -5343830458885399943, guid: a51870dcf67166d4384207bfeb752967, type: 3}
+  interactionRange: 100
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
