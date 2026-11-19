@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 11489aee9f92d7f4aa05999cdd1fb18b
+guid: 173e500756498b34990049d4ee981302
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 4222152913772123652
-    second: Passerby_Wanderer_0
+      213: -6289992135921894308
+    second: Lucien_Park_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -115,13 +115,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: Passerby_Wanderer_0
+      name: Lucien_Park_0
       rect:
         serializedVersion: 2
-        x: 47
-        y: 3
-        width: 174
-        height: 398
+        x: 26
+        y: 4
+        width: 45
+        height: 132
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -130,8 +130,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 40694c484b9189a30800000000000000
-      internalID: 4222152913772123652
+      spriteID: c5cff5a6a7575b8a0800000000000000
+      internalID: -6289992135921894308
       vertices: []
       indices: 
       edges: []
@@ -150,7 +150,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      Passerby_Wanderer_0: 4222152913772123652
+      Lucien_Park_0: -6289992135921894308
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

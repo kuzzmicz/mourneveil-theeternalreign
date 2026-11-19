@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-// Park v0.1. Standalone prototype: does not modify the Crypt / Prologue save data.
+// Park v0.5. Separate Park save, backwards-compatible with v0.1–v0.4.
+public enum ParkFollowerRole { Hunter = 0, Spy = 1, Scholar = 2, Guardian = 3 }
 [Serializable]
 public class ParkHuman
 {
@@ -21,10 +22,19 @@ public class ParkHuman
 [Serializable]
 public class ParkFollower
 {
+    // Legacy fields retained exactly: v0.1-v0.4 JSON still deserializes.
     public string title;
     public float bloodPerSecond;
     public int intelligence;
     public int stealth;
+
+    // New v0.5 identity, traits, visual variant and assignment.
+    public int id;
+    public int appearanceIndex;
+    public int willpower;
+    public int fear;
+    public int strength;
+    public ParkFollowerRole role = ParkFollowerRole.Hunter;
 }
 
 [Serializable]
@@ -41,6 +51,7 @@ public class ParkProgress
     // v0.4: persisted with the active encounter; old v1 saves default to false.
     public bool currentEncounterAmbush = false;
     public List<ParkFollower> followers = new List<ParkFollower>();
+    public int nextFollowerId = 1;
     public string lastMessage = "The park is quiet. Find someone in the shadows.";
     public long lastSavedUtcTicks = 0;
 }
@@ -50,6 +61,7 @@ public class MourneveilParkGame : MonoBehaviour
 {
     private const string SaveFile = "mourneveil_park_v1.json";
     private const float TurnSoulCost = 18f;
+    private const int RoleTrainingBloodCost = 15;
     [Header("Optional background (can be added later)")]
     [SerializeField] private Sprite parkBackground;
 
@@ -65,24 +77,105 @@ public class MourneveilParkGame : MonoBehaviour
     private float autosaveTimer;
     private float refreshTimer;
     private float layLowCooldownRemaining;
+    private bool needsLegacySaveBackup;
 
     public ParkProgress State { get { return state; } }
     public Sprite Background { get { return parkBackground; } }
     public float TurnCost { get { return TurnSoulCost; } }
     public bool HuntersAlerted { get { return state.suspicion >= 99.9f; } }
     public float LayLowCooldown { get { return layLowCooldownRemaining; } }
+    public int RoleCost { get { return RoleTrainingBloodCost; } }
+
+    // Scholars boost every source of Blood/sec. Boost capped at +100%.
+    public float ScholarBonus
+    {
+        get
+        {
+            float boost = 0f;
+            foreach (ParkFollower ally in FollowersSafe())
+                if (ally.role == ParkFollowerRole.Scholar)
+                    boost += 0.07f + Mathf.Clamp(ally.intelligence, 0, 100) / 1000f;
+            return Mathf.Min(1f, boost);
+        }
+    }
+
+    // Spies accelerate decay when Lucien is not engaged in an encounter.
+    public float SpySuspicionDecay
+    {
+        get
+        {
+            float extra = 0f;
+            foreach (ParkFollower ally in FollowersSafe())
+                if (ally.role == ParkFollowerRole.Spy)
+                    extra += 0.04f + Mathf.Clamp(ally.stealth, 0, 100) / 1600f;
+            return Mathf.Min(1.2f, extra);
+        }
+    }
+
+    // Guardians reduce immediate suspicion increases, up to 60% total.
+    public float GuardianProtection
+    {
+        get
+        {
+            float protection = 0f;
+            foreach (ParkFollower ally in FollowersSafe())
+                if (ally.role == ParkFollowerRole.Guardian)
+                    protection += 0.06f + Mathf.Clamp(ally.strength, 0, 100) / 2000f;
+            return Mathf.Min(0.6f, protection);
+        }
+    }
+
+    private IEnumerable<ParkFollower> FollowersSafe()
+    {
+        if (state == null || state.followers == null) yield break;
+        foreach (ParkFollower ally in state.followers)
+            if (ally != null) yield return ally;
+    }
+
+    public ParkFollower GetFollower(int id)
+    {
+        foreach (ParkFollower ally in FollowersSafe())
+            if (ally.id == id) return ally;
+        return null;
+    }
+
+    public int CountRole(ParkFollowerRole role)
+    {
+        int count = 0;
+        foreach (ParkFollower ally in FollowersSafe())
+            if (ally.role == role) count++;
+        return count;
+    }
+
+    public bool CanAssignRole(int id, ParkFollowerRole role)
+    {
+        ParkFollower ally = GetFollower(id);
+        return ally != null && ally.role != role &&
+            state.currentHuman == null && state.blood >= RoleTrainingBloodCost &&
+            (int)role >= 0 && (int)role <= 3;
+    }
+
+    public bool AssignFollowerRole(int id, ParkFollowerRole role)
+    {
+        if (!CanAssignRole(id, role)) return false;
+        ParkFollower ally = GetFollower(id);
+        state.blood -= RoleTrainingBloodCost;
+        ally.role = role;
+        state.lastMessage = ally.title + " has been assigned as " + role +
+            ". Training cost: " + RoleTrainingBloodCost + " Blood.";
+        CommitChange();
+        return true;
+    }
 
     public float BloodPerSecond
     {
         get
         {
             float value = networkBaseProduction * state.supplyNetworkLevel;
-            if (state.followers != null)
-            {
-                foreach (ParkFollower follower in state.followers)
-                    if (follower != null) value += follower.bloodPerSecond;
-            }
-            return value;
+            foreach (ParkFollower ally in FollowersSafe())
+                if (ally.role == ParkFollowerRole.Hunter)
+                    value += Mathf.Max(0f, ally.bloodPerSecond);
+            return value * (1f + ScholarBonus);
         }
     }
 
@@ -101,8 +194,10 @@ public class MourneveilParkGame : MonoBehaviour
         {
             if (state.currentHuman == null) return 0f;
             // Strong willpower makes turning harder. Other abilities are independent.
+            int scholars = CountRole(ParkFollowerRole.Scholar);
+            float research = Mathf.Min(12f, scholars * 2f);
             return Mathf.Clamp(82f - state.currentHuman.willpower * 0.65f +
-                (state.currentEncounterAmbush ? 8f : 0f), 12f, 88f);
+                (state.currentEncounterAmbush ? 8f : 0f) + research, 12f, 94f);
         }
     }
 
@@ -127,7 +222,8 @@ public class MourneveilParkGame : MonoBehaviour
         float production = BloodPerSecond;
         if (production > 0f) state.blood += production * dt;
         if (state.currentHuman == null && state.suspicion > 0f)
-            state.suspicion = Mathf.Max(0f, state.suspicion - naturalSuspicionDecreasePerSecond * dt);
+            state.suspicion = Mathf.Max(0f, state.suspicion -
+                (naturalSuspicionDecreasePerSecond + SpySuspicionDecay) * dt);
         layLowCooldownRemaining = Mathf.Max(0f, layLowCooldownRemaining - dt);
         autosaveTimer += dt;
         if (autosaveTimer >= 15f)
@@ -250,17 +346,24 @@ public class MourneveilParkGame : MonoBehaviour
         {
             // Prototype simplification: a successful turning joins the faction.
             // Recruitment/consent/loyalty are separate mechanics in the full GDD.
-            float production = (float)Math.Round(0.20f + (target.intelligence + target.stealth) / 180f, 2);
+            float production = (float)Math.Round(0.20f + (target.strength + target.stealth) / 180f, 2);
             if (state.followers == null) state.followers = new List<ParkFollower>();
             state.followers.Add(new ParkFollower
             {
+                id = state.nextFollowerId++,
                 title = target.title,
                 bloodPerSecond = production,
                 intelligence = target.intelligence,
-                stealth = target.stealth
+                stealth = target.stealth,
+                strength = target.strength,
+                fear = target.fear,
+                willpower = target.willpower,
+                appearanceIndex = target.appearanceIndex,
+                role = ParkFollowerRole.Hunter
             });
             RaiseSuspicion(state.currentEncounterAmbush ? 2.5f : 5f);
-            CompleteEncounter("Turning succeeded! A new ally produces +" + production.ToString("0.00") + " Blood/sec.");
+            CompleteEncounter("Turning succeeded! A new vampire joins your Dynasty as a Hunter (+" +
+                production.ToString("0.00") + " Blood/sec). Open MANAGE DYNASTY to assign roles.");
         }
         else
         {
@@ -306,6 +409,7 @@ public class MourneveilParkGame : MonoBehaviour
     {
         state = new ParkProgress();
         layLowCooldownRemaining = 0f;
+        needsLegacySaveBackup = false;
         try { if (File.Exists(SavePath)) File.Delete(SavePath); }
         catch (Exception e) { Debug.LogWarning("[Mourneveil Park] Could not delete save: " + e.Message); }
         Refresh();
@@ -320,6 +424,38 @@ public class MourneveilParkGame : MonoBehaviour
         CommitChange();
     }
 
+    // Convenient inspector-only prototype commands; no in-game cheat UI.
+    [ContextMenu("DEV: Add sample vampire")]
+    private void RecruitSampleVampireForTesting()
+    {
+        if (state.followers == null) state.followers = new List<ParkFollower>();
+        state.nextFollowerId = Mathf.Max(1, state.nextFollowerId);
+        int id = state.nextFollowerId++;
+        state.followers.Add(new ParkFollower
+        {
+            id = id,
+            title = "Midnight volunteer " + id,
+            bloodPerSecond = 0.65f,
+            intelligence = 82,
+            stealth = 74,
+            strength = 63,
+            fear = 29,
+            willpower = 70,
+            appearanceIndex = id % 3,
+            role = ParkFollowerRole.Hunter
+        });
+        state.lastMessage = "DEV: Sample vampire #" + id + " added as Hunter.";
+        CommitChange();
+    }
+
+    [ContextMenu("DEV: Add 500 Blood")]
+    private void AddBloodForTesting()
+    {
+        state.blood += 500f;
+        state.lastMessage = "DEV: Added 500 Blood for testing role assignments.";
+        CommitChange();
+    }
+
     private bool CanAct()
     {
         return state.currentHuman != null && !HuntersAlerted;
@@ -329,6 +465,8 @@ public class MourneveilParkGame : MonoBehaviour
     {
         // Humanity under 35 has one immediate gameplay consequence: less control.
         if (state.humanity < 35f) value += 5f;
+        // Guardians protect against immediate suspicion, spies handle passive decay.
+        if (value > 0f) value *= (1f - GuardianProtection);
         state.suspicion = Mathf.Clamp(state.suspicion + value, 0f, 100f);
     }
 
@@ -360,11 +498,16 @@ public class MourneveilParkGame : MonoBehaviour
         {
             if (File.Exists(SavePath))
             {
-                ParkProgress loaded = JsonUtility.FromJson<ParkProgress>(File.ReadAllText(SavePath));
+                string savedJson = File.ReadAllText(SavePath);
+                ParkProgress loaded = JsonUtility.FromJson<ParkProgress>(savedJson);
                 if (loaded != null && loaded.version == 1)
+                {
                     state = loaded;
+                    needsLegacySaveBackup = !savedJson.Contains("\"nextFollowerId\"");
+                }
             }
             if (state.followers == null) state.followers = new List<ParkFollower>();
+            MigrateFollowers();
             if (state.currentHuman == null) state.currentEncounterAmbush = false;
             state.humanity = Mathf.Clamp(state.humanity, 0f, 100f);
             state.soulIntegrity = Mathf.Clamp(state.soulIntegrity, 0f, 100f);
@@ -392,10 +535,56 @@ public class MourneveilParkGame : MonoBehaviour
         }
     }
 
+    // JsonUtility leaves missing fields at defaults in older Park saves.
+    // Assign unique ids and recover approximate traits for old, stat-light allies.
+    // Never modify legacy bloodPerSecond: an old Hunter keeps their production.
+    private void MigrateFollowers()
+    {
+        if (state.followers == null) state.followers = new List<ParkFollower>();
+        int next = Mathf.Max(1, state.nextFollowerId);
+        // Reserve all existing positive identities before assigning ids to legacy allies.
+        foreach (ParkFollower existing in state.followers)
+            if (existing != null && existing.id >= next)
+                next = existing.id + 1;
+        HashSet<int> used = new HashSet<int>();
+        foreach (ParkFollower ally in state.followers)
+        {
+            if (ally == null) continue;
+            if (ally.id <= 0 || used.Contains(ally.id))
+            {
+                while (used.Contains(next)) next++;
+                ally.id = next++;
+            }
+            used.Add(ally.id);
+            next = Math.Max(next, ally.id + 1);
+            if (string.IsNullOrEmpty(ally.title)) ally.title = "Unknown vampire #" + ally.id;
+            ally.intelligence = Mathf.Clamp(ally.intelligence, 0, 100);
+            ally.stealth = Mathf.Clamp(ally.stealth, 0, 100);
+            if (ally.strength <= 0) ally.strength = 25 + ally.stealth / 2;
+            if (ally.willpower <= 0) ally.willpower = 25 + ally.intelligence / 2;
+            if (ally.fear <= 0) ally.fear = 50;
+            ally.strength = Mathf.Clamp(ally.strength, 1, 100);
+            ally.willpower = Mathf.Clamp(ally.willpower, 1, 100);
+            ally.fear = Mathf.Clamp(ally.fear, 1, 100);
+            ally.appearanceIndex = Mathf.Clamp(ally.appearanceIndex, 0, 2);
+            if ((int)ally.role < 0 || (int)ally.role > 3) ally.role = ParkFollowerRole.Hunter;
+            if (ally.bloodPerSecond < 0f) ally.bloodPerSecond = 0f;
+        }
+        state.nextFollowerId = next;
+    }
+
     private void SaveProgress()
     {
         try
         {
+            // Make a one-time copy of pre-v0.5 progress before writing upgraded JSON.
+            if (needsLegacySaveBackup && File.Exists(SavePath))
+            {
+                string backupPath = Path.Combine(Application.persistentDataPath,
+                    "mourneveil_park_v1.pre_v05.bak");
+                if (!File.Exists(backupPath)) File.Copy(SavePath, backupPath);
+                needsLegacySaveBackup = false;
+            }
             state.lastSavedUtcTicks = DateTime.UtcNow.Ticks;
             string json = JsonUtility.ToJson(state, true);
             File.WriteAllText(SavePath, json);
