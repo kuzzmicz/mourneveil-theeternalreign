@@ -22,11 +22,13 @@ public sealed class MourneveilParkPlayer : MonoBehaviour
     private bool encounterActive;
     private bool sneaking;
     private bool sprinting;
+    private bool moving;
     private Vector3 initialImageScale;
 
     public Vector2 ParkPosition { get { return rect == null ? Vector2.zero : rect.anchoredPosition; } }
     public bool IsSneaking { get { return sneaking && !encounterActive; } }
     public bool IsSprinting { get { return sprinting && !encounterActive; } }
+    public bool IsMoving { get { return moving && !encounterActive; } }
     public bool EncounterActive { get { return encounterActive; } }
 
     public void Initialize(Image artwork, Vector2 startingPosition)
@@ -46,9 +48,14 @@ public sealed class MourneveilParkPlayer : MonoBehaviour
     private void Update()
     {
         if (rect == null) return;
-        if (encounterActive) return;
+        if (encounterActive)
+        {
+            moving = false;
+            return;
+        }
 
         Vector2 axis = ReadMoveKeys();
+        moving = axis.sqrMagnitude > 0.01f;
         sneaking = ReadSneakKey();
         sprinting = !sneaking && ReadSprintKey();
         float speed = sneaking ? sneakSpeed : (sprinting ? sprintSpeed : walkingSpeed);
