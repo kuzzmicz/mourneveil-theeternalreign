@@ -14,7 +14,7 @@ public sealed class MourneveilParkPlayer : MonoBehaviour
     [SerializeField, Min(10f)] private float sprintSpeed = 325f;
     [SerializeField, Min(10f)] private float sneakSpeed = 105f;
     [SerializeField] private Vector2 horizontalLimits = new Vector2(-515f, 515f);
-    [SerializeField] private Vector2 verticalLimits = new Vector2(58f, 305f);
+    [SerializeField] private Vector2 verticalLimits = new Vector2(58f, 135f);
 
     private RectTransform rect;
     private Image image;
