@@ -2,10 +2,11 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
-// Mourneveil Park - Character Animation v1.0
+// Mourneveil Park - Character Animation v1.0.2 (Art path + serialized sprites)
 // Drop-in support for the runtime UI from Park v0.5.1.
 // Add this component to _ParkSystems; keep all existing Park scripts unchanged.
-// Expects Sprite PNG files in Assets/Resources/Mourneveil/ParkAnimations/.
+// Sprites are serialized and assigned from Assets/Art/ParkAnimations/ in EDIT MODE.
+// No Resources.Load: works in both Editor and standalone builds.
 [DisallowMultipleComponent]
 public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
 {
@@ -16,9 +17,23 @@ public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
     [SerializeField, Range(2f, 12f)] private float lucienSneakFps = 4f;
     [SerializeField, Range(0.1f, 12f)] private float npcMinMoveSpeed = 2f;
 
-    private const string SpritesFolder = "Mourneveil/ParkAnimations/";
+    [Header("Animation frames (96 x 144 PNG, 4 per direction)")]
+    [Tooltip("Use component menu > Assign sprites from Art/ParkAnimations, then save the scene.")]
+    [SerializeField] private Sprite[] lucienWalkRight = new Sprite[4];
+    [SerializeField] private Sprite[] lucienWalkLeft = new Sprite[4];
+    [SerializeField] private Sprite[] studentWalkRight = new Sprite[4];
+    [SerializeField] private Sprite[] studentWalkLeft = new Sprite[4];
+    [SerializeField] private Sprite[] guardWalkRight = new Sprite[4];
+    [SerializeField] private Sprite[] guardWalkLeft = new Sprite[4];
+    [SerializeField] private Sprite[] wandererWalkRight = new Sprite[4];
+    [SerializeField] private Sprite[] wandererWalkLeft = new Sprite[4];
+
+    private const string ArtFolder = "Assets/Art/ParkAnimations/";
     private readonly Character[] characters = new Character[4];
     private bool connected;
+    private readonly Sprite[][] rightSets = new Sprite[4][];
+    private readonly Sprite[][] leftSets = new Sprite[4][];
+    private static readonly string[] CharacterKeys = { "lucien", "student", "guard", "wanderer" };
 
     private sealed class Character
     {
@@ -36,8 +51,15 @@ public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
 
     private void Start()
     {
-        // Park UI is created dynamically by MourneveilParkGame.Start(),
-        // so wait for it instead of relying on component execution order.
+        // Validate serialized references once. Do not use Resources.Load here:
+        // PNGs are intentionally in Assets/Art/ParkAnimations, not Resources.
+        if (!PrepareFrames())
+        {
+            enabled = false; // Existing static character sprites remain visible.
+            return;
+        }
+
+        // Park UI is generated dynamically; wait for it instead of relying on script order.
         StartCoroutine(ConnectWhenReady());
     }
 
@@ -58,8 +80,9 @@ public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
             }
             yield return null;
         }
-        Debug.LogWarning("[Mourneveil Park] Animation setup could not find the runtime park. " +
-                         "Open scene Park and check that Park v0.5.1 is installed.");
+        Debug.LogWarning("[Mourneveil Park] Animation sprites loaded, but required runtime " +
+                         "objects were not found within 240 frames. Expand Canvas/Park_Runtime_UI_v05/" +
+                         "Moonlit Park and check Lucien_Player, Passerby_1, Passerby_2, Passerby_3.");
     }
 
     private bool TryConnect(Transform world)
@@ -88,8 +111,10 @@ public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
     private Character CreateCharacter(Transform root, Image art, string key, bool isPlayer)
     {
         if (art == null) return null;
-        Sprite[] right = LoadFrames(key, "R");
-        Sprite[] left = isPlayer ? right : LoadFrames(key, "L");
+        int spriteIndex = System.Array.IndexOf(CharacterKeys, key);
+        if (spriteIndex < 0) return null;
+        Sprite[] right = rightSets[spriteIndex];
+        Sprite[] left = leftSets[spriteIndex];
         if (right == null || left == null) return null;
 
         RectTransform position = root.GetComponent<RectTransform>();
@@ -110,22 +135,85 @@ public sealed class MourneveilParkAnimationBootstrap : MonoBehaviour
         return entry;
     }
 
-    private static Sprite[] LoadFrames(string key, string direction)
+    // Runtime uses serialized Sprite references: works even after making a game build.
+    // ParkPlayer already mirrors Lucien's right-facing Image when moving left,
+    // so we deliberately reuse right frames to avoid mirroring twice.
+    private bool PrepareFrames()
     {
-        Sprite[] loaded = new Sprite[4];
-        for (int i = 0; i < loaded.Length; i++)
+        rightSets[0] = ValidateFrames(lucienWalkRight, "lucien_walk_R");
+        leftSets[0] = rightSets[0];
+        rightSets[1] = ValidateFrames(studentWalkRight, "student_walk_R");
+        leftSets[1] = ValidateFrames(studentWalkLeft, "student_walk_L");
+        rightSets[2] = ValidateFrames(guardWalkRight, "guard_walk_R");
+        leftSets[2] = ValidateFrames(guardWalkLeft, "guard_walk_L");
+        rightSets[3] = ValidateFrames(wandererWalkRight, "wanderer_walk_R");
+        leftSets[3] = ValidateFrames(wandererWalkLeft, "wanderer_walk_L");
+
+        for (int i = 0; i < CharacterKeys.Length; i++)
+            if (rightSets[i] == null || leftSets[i] == null) return false;
+        return true;
+    }
+
+    private static Sprite[] ValidateFrames(Sprite[] frames, string key)
+    {
+        if (frames == null || frames.Length != 4)
         {
-            string path = SpritesFolder + key + "_walk_" + direction + "_" + i.ToString("00");
-            loaded[i] = Resources.Load<Sprite>(path);
-            if (loaded[i] == null)
+            Debug.LogError("[Mourneveil Park] " + key +
+                " needs exactly 4 sprites. Use component menu > " +
+                "Assign sprites from Assets/Art/ParkAnimations (EDIT MODE), then save scene.");
+            return null;
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (frames[i] == null)
             {
-                Debug.LogWarning("[Mourneveil Park] Missing Sprite at Resources/" + path +
-                                 ". Check Texture Type = Sprite (2D and UI).");
+                Debug.LogError("[Mourneveil Park] Missing Sprite reference: " + key + "_" +
+                    i.ToString("00") + ".png. Expected Asset: " + ArtFolder + key + "_" +
+                    i.ToString("00") + ".png. Assign from component menu in Edit Mode, " +
+                    "then save scene. No Resources folder is needed.");
                 return null;
             }
         }
-        return loaded;
+        return frames;
     }
+
+#if UNITY_EDITOR
+    [ContextMenu("Assign sprites from Assets/Art/ParkAnimations")]
+    private void AssignSpritesFromArtFolder()
+    {
+        // UnityEditor is compiled only in the Editor. References are serialized,
+        // which means runtime and standalone builds NEVER need AssetDatabase.
+        lucienWalkRight = ReadEditorFrames("lucien", "R");
+        lucienWalkLeft = ReadEditorFrames("lucien", "L");
+        studentWalkRight = ReadEditorFrames("student", "R");
+        studentWalkLeft = ReadEditorFrames("student", "L");
+        guardWalkRight = ReadEditorFrames("guard", "R");
+        guardWalkLeft = ReadEditorFrames("guard", "L");
+        wandererWalkRight = ReadEditorFrames("wanderer", "R");
+        wandererWalkLeft = ReadEditorFrames("wanderer", "L");
+
+        UnityEditor.EditorUtility.SetDirty(this);
+        if (gameObject.scene.IsValid())
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
+        Debug.Log("[Mourneveil Park] Animation sprite references assigned from " +
+                  ArtFolder + ". Save the Park scene (Ctrl+S) before Play/Build.", this);
+    }
+
+    private static Sprite[] ReadEditorFrames(string key, string dir)
+    {
+        Sprite[] result = new Sprite[4];
+        for (int i = 0; i < result.Length; i++)
+        {
+            string file = key + "_walk_" + dir + "_" + i.ToString("00") + ".png";
+            string path = ArtFolder + file;
+            result[i] = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+            if (result[i] == null)
+                Debug.LogError("[Mourneveil Park] Could not assign " + path +
+                    ". Check file location, capitalization and Texture Type = Sprite (2D and UI).");
+        }
+        return result;
+    }
+#endif
 
     private void LateUpdate()
     {
