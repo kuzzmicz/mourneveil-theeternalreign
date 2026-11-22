@@ -151,7 +151,7 @@ public class MourneveilParkUI : MonoBehaviour
                 game.State.currentHuman.appearanceIndex == index
                 ? game.State.currentHuman : game.CreateHumanPreview(index);
             walkers[i] = CreateWalker(world, sprites[i], index, candidate,
-                positionsX[i], 225f + i * 8f, speeds[i], () => MarkWalker(index), player);
+                positionsX[i], 90f + i * 8f, speeds[i], () => MarkWalker(index), player);
         }
         player.transform.SetAsLastSibling();
         nearbyHintText = AddText("Park Action Prompt", world,

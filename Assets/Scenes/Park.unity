@@ -130,6 +130,7 @@ GameObject:
   - component: {fileID: 400896999}
   - component: {fileID: 400896998}
   - component: {fileID: 400897000}
+  - component: {fileID: 400897001}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -190,6 +191,23 @@ MonoBehaviour:
   detectionDifficulty: 1
   sneakDetectionMultiplier: 0.22
   showHuntOutcomePopup: 1
+--- !u!114 &400897001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8d6ad45103261cc4c9f92d129c017311, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilParkAnimationBootstrap
+  npcWalkFps: 7
+  lucienWalkFps: 8
+  lucienRunFps: 12
+  lucienSneakFps: 4
+  npcMinMoveSpeed: 2
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0

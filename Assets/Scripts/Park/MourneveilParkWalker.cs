@@ -122,7 +122,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
     {
         cooldown = UnityEngine.Random.Range(4.5f, 8f);
         position = new Vector2(Mathf.Clamp(home.x + UnityEngine.Random.Range(-95f, 95f), -495f, 495f),
-            Mathf.Clamp(home.y + UnityEngine.Random.Range(-25f, 25f), 90f, 300f));
+            Mathf.Clamp(home.y + UnityEngine.Random.Range(-25f, 25f), 80f, 135f));
         home = position;
         awareness = 0f;
         spotted = false;
@@ -165,7 +165,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
                 position = Vector2.MoveTowards(position, destination, (53f + index * 7f) * dt);
             }
             position.x = Mathf.Clamp(position.x, -520f, 520f);
-            position.y = Mathf.Clamp(position.y, 88f, 304f);
+            position.y = Mathf.Clamp(position.y, 75f, 135f);
         }
 
         rect.anchoredPosition = position;
