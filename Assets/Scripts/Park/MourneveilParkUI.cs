@@ -5,7 +5,8 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// Mourneveil Park v0.5.1: Dynasty Management + readable, acknowledged hunt outcomes.
+// Mourneveil Park v0.6: Flight to park edge + playable confrontation choices.
+// Preserves Dynasty Management and readable acknowledged hunt outcomes.
 // Generates its UI at runtime; no prefabs or editor scripts are required.
 [DisallowMultipleComponent]
 public class MourneveilParkUI : MonoBehaviour
@@ -60,6 +61,24 @@ public class MourneveilParkUI : MonoBehaviour
     private bool IsOutcomeVisible
     {
         get { return outcomeOverlay != null && outcomeOverlay.gameObject.activeSelf; }
+    }
+
+    // v0.6: Genuine face-to-face confrontation (not a passive NPC state).
+    private RectTransform confrontationOverlay;
+    private TMP_Text confrontationHeadingText, confrontationBodyText;
+    private readonly Button[] confrontationChoiceButtons = new Button[4];
+    private Button confrontationContinueButton;
+    private MourneveilParkWalker confrontationTarget;
+    private bool confrontationResultPending;
+    private bool confrontationSucceeded;
+    private bool confrontationMesmerized;
+    private bool confrontationBackingOff;
+    private string confrontationMethod;
+    private const float MesmerizeSoulCost = 6f;
+    private enum ConfrontChoice { Overpower, Intimidate, Mesmerize, BackOff }
+    private bool IsConfrontationVisible
+    {
+        get { return confrontationOverlay != null && confrontationOverlay.gameObject.activeSelf; }
     }
 
     private bool built;
@@ -151,7 +170,7 @@ public class MourneveilParkUI : MonoBehaviour
                 game.State.currentHuman.appearanceIndex == index
                 ? game.State.currentHuman : game.CreateHumanPreview(index);
             walkers[i] = CreateWalker(world, sprites[i], index, candidate,
-                positionsX[i], 90f + i * 8f, speeds[i], () => MarkWalker(index), player);
+                positionsX[i], 95f + i * 10f, speeds[i], () => MarkWalker(index), player);
         }
         player.transform.SetAsLastSibling();
         nearbyHintText = AddText("Park Action Prompt", world,
@@ -210,6 +229,7 @@ public class MourneveilParkUI : MonoBehaviour
         Place(resultText.rectTransform, 25, 685, 570, 84);
 
         BuildDynastyRoster(root);
+        BuildConfrontationOverlay(root);
         BuildOutcomePopup(root); // Last sibling: always above the rest of the park UI.
         built = true;
     }
@@ -233,7 +253,8 @@ public class MourneveilParkUI : MonoBehaviour
                 "     Strength: " + person.strength + "     Blood: ~" + person.bloodYield + "\n" +
                 "Intelligence: " + person.intelligence + "     Stealth: " + person.stealth +
                 "     Turning chance: " + game.TurningChance.ToString("0") + "%" +
-                (state.currentEncounterAmbush ? "     [STEALTH AMBUSH!]" : "");
+                (state.currentEncounterAmbush ? "     [STEALTH AMBUSH!]"
+                    : state.currentEncounterMesmerized ? "     [MESMERIZED]" : "");
         }
         else
         {
@@ -265,13 +286,15 @@ public class MourneveilParkUI : MonoBehaviour
         lastResolvedCount = state.encountersResolved;
         bool rosterOpen = rosterOverlay != null && rosterOverlay.gameObject.activeSelf;
         bool outcomeOpen = IsOutcomeVisible;
-        player.SetEncounterActive(engaged || rosterOpen || outcomeOpen);
+        bool confrontationOpen = IsConfrontationVisible;
+        player.SetEncounterActive(engaged || rosterOpen || outcomeOpen || confrontationOpen);
         for (int i = 0; i < walkers.Length; i++)
         {
             if (walkers[i] != null)
             {
                 walkers[i].SetState(engaged && person.appearanceIndex == i,
-                    engaged || rosterOpen || outcomeOpen || game.HuntersAlerted);
+                    engaged || rosterOpen || outcomeOpen || confrontationOpen ||
+                    (game.HuntersAlerted && !walkers[i].IsFleeing));
                 walkers[i].SetMarked(!engaged && markedWalker == i);
             }
         }
@@ -296,7 +319,8 @@ public class MourneveilParkUI : MonoBehaviour
             " / R " + game.CountRole(ParkFollowerRole.Scholar) +
             " / G " + game.CountRole(ParkFollowerRole.Guardian) +
             "\nScholar boost: +" + (game.ScholarBonus * 100f).ToString("0") + "% Blood/sec";
-        manageDynastyButton.interactable = allies > 0 && !engaged;
+        manageDynastyButton.interactable = allies > 0 && !engaged &&
+            !confrontationOpen && !outcomeOpen;
         warningText.text = game.HuntersAlerted
             ? "HUNTER ALERT! Hunting blocked until Suspicion falls."
             : (state.humanity < 35
@@ -309,7 +333,8 @@ public class MourneveilParkUI : MonoBehaviour
                   (state.currentEncounterAmbush ? 3 : 0)) +
               " | Drain +" + (person.bloodYield * 3) + " | Turn costs " +
               game.TurnCost.ToString("0") + " Soul." +
-              (state.currentEncounterAmbush ? "  UNDETECTED BONUS!" : "")
+              (state.currentEncounterAmbush ? "  UNDETECTED BONUS!"
+                  : state.currentEncounterMesmerized ? "  MESMERIZED: QUIETER FEEDING!" : "")
             : "Approach quietly for a stealth reward. Intelligent NPCs detect you sooner.";
         // Keep the last resolved hunt visible in NIGHT LOG even if NPCs later
         // report spotting Lucien and replace state.lastMessage.
@@ -371,6 +396,180 @@ public class MourneveilParkUI : MonoBehaviour
     {
         if (outcomeOverlay != null) outcomeOverlay.gameObject.SetActive(false);
         if (gameRef != null) Refresh(gameRef);
+    }
+
+    // --------- v0.6: confrontations with a readable, manual result ---------
+    private void BuildConfrontationOverlay(RectTransform root)
+    {
+        confrontationOverlay = NewRect("Confrontation Overlay", root);
+        Stretch(confrontationOverlay);
+        Image shade = AddImage("Confrontation Shade", confrontationOverlay,
+            new Color(0.014f, 0.004f, 0.017f, 0.89f));
+        Stretch(shade.rectTransform);
+        shade.raycastTarget = true;
+
+        RectTransform surface = Frame("Confrontation Frame", confrontationOverlay,
+            390f, 233f, 1140f, 620f);
+        TMP_Text smallTitle = AddText("Kicker", surface,
+            "MOURNEVEIL   /   THE ART OF HUNTING", 19, muted, TextAlignmentOptions.Left);
+        Place(smallTitle.rectTransform, 40f, 26f, 1050f, 35f);
+        confrontationHeadingText = AddText("Confrontation Title", surface,
+            "THE STRANGER STANDS THEIR GROUND", 38, ivory, TextAlignmentOptions.Left);
+        Place(confrontationHeadingText.rectTransform, 40f, 76f, 1050f, 65f);
+        confrontationBodyText = AddText("Confrontation Description", surface, "",
+            24, ivory, TextAlignmentOptions.TopLeft);
+        Place(confrontationBodyText.rectTransform, 40f, 163f, 1055f, 143f);
+        confrontationBodyText.textWrappingMode = TextWrappingModes.Normal;
+
+        confrontationChoiceButtons[0] = MakeButton(surface, "OVERPOWER", 42f, 324f, 506f, 79f,
+            () => ApplyConfrontationChoice(ConfrontChoice.Overpower));
+        confrontationChoiceButtons[1] = MakeButton(surface, "INTIMIDATE", 590f, 324f, 506f, 79f,
+            () => ApplyConfrontationChoice(ConfrontChoice.Intimidate));
+        confrontationChoiceButtons[2] = MakeButton(surface, "MESMERIZE (-6 SOUL)", 42f, 428f, 506f, 79f,
+            () => ApplyConfrontationChoice(ConfrontChoice.Mesmerize));
+        confrontationChoiceButtons[3] = MakeButton(surface, "BACK OFF", 590f, 428f, 506f, 79f,
+            () => ApplyConfrontationChoice(ConfrontChoice.BackOff));
+        confrontationContinueButton = MakeButton(surface, "CONTINUE", 352f, 420f, 438f, 87f,
+            ContinueConfrontation);
+        confrontationContinueButton.gameObject.SetActive(false);
+        confrontationOverlay.gameObject.SetActive(false);
+    }
+
+    private float ConfrontationChance(ConfrontChoice action, ParkHuman person)
+    {
+        if (person == null || gameRef == null) return 0f;
+        ParkProgress s = gameRef.State;
+        float chance;
+        switch (action)
+        {
+            case ConfrontChoice.Overpower:
+                chance = 78f + s.soulIntegrity * 0.16f - person.strength * 0.62f -
+                         person.willpower * 0.12f;
+                break;
+            case ConfrontChoice.Intimidate:
+                chance = 40f + (100f - s.humanity) * 0.33f + person.fear * 0.28f -
+                         person.willpower * 0.32f;
+                break;
+            case ConfrontChoice.Mesmerize:
+                chance = 52f + s.soulIntegrity * 0.25f +
+                         Mathf.Min(12f, gameRef.CountRole(ParkFollowerRole.Scholar) * 2f) -
+                         person.willpower * 0.55f;
+                break;
+            default: return 100f;
+        }
+        return Mathf.Clamp(chance, 12f, 92f);
+    }
+
+    private void OpenConfrontation(MourneveilParkWalker target)
+    {
+        if (gameRef == null || target == null || !target.IsConfronting ||
+            IsOutcomeVisible || IsConfrontationVisible || gameRef.HuntersAlerted) return;
+        confrontationTarget = target;
+        confrontationResultPending = false;
+        confrontationSucceeded = false;
+        confrontationMesmerized = false;
+        confrontationBackingOff = false;
+        confrontationMethod = "";
+        ParkHuman h = target.Human;
+        confrontationHeadingText.text = "THE STRANGER STANDS THEIR GROUND";
+        confrontationBodyText.text = h.title + " refuses to flee. They have seen Lucien." +
+            "\nStrength " + h.strength + "   /   Fear " + h.fear +
+            "   /   Willpower " + h.willpower + "\n\nChoose your approach:" +
+            "   Overpower " + ConfrontationChance(ConfrontChoice.Overpower, h).ToString("0") + "%" +
+            "   |   Intimidate " + ConfrontationChance(ConfrontChoice.Intimidate, h).ToString("0") + "%" +
+            "   |   Mesmerize " + ConfrontationChance(ConfrontChoice.Mesmerize, h).ToString("0") + "%";
+        for (int i = 0; i < confrontationChoiceButtons.Length; i++)
+        {
+            confrontationChoiceButtons[i].gameObject.SetActive(true);
+            confrontationChoiceButtons[i].interactable =
+                i != (int)ConfrontChoice.Mesmerize || gameRef.State.soulIntegrity >= MesmerizeSoulCost;
+        }
+        confrontationContinueButton.gameObject.SetActive(false);
+        confrontationOverlay.gameObject.SetActive(true);
+        Refresh(gameRef); // Freeze player and walkers, but keep Blood/sec ticking.
+    }
+
+    private void ApplyConfrontationChoice(ConfrontChoice choice)
+    {
+        if (!IsConfrontationVisible || confrontationResultPending ||
+            confrontationTarget == null || gameRef == null) return;
+        ParkHuman person = confrontationTarget.Human;
+        if (person == null) return;
+        confrontationBackingOff = choice == ConfrontChoice.BackOff;
+        confrontationMesmerized = choice == ConfrontChoice.Mesmerize;
+        confrontationMethod = choice.ToString().ToUpperInvariant();
+
+        if (confrontationBackingOff)
+        {
+            confrontationSucceeded = false;
+            confrontationHeadingText.text = "YOU WITHDRAW INTO THE NIGHT";
+            confrontationBodyText.text = "Lucien chooses not to force the encounter." +
+                "\nThe stranger leaves. No additional Suspicion is raised.";
+            gameRef.ReportConfrontationBackOff(person);
+        }
+        else
+        {
+            // Roll against the displayed odds, before Mesmerism spends Soul.
+            float chance = ConfrontationChance(choice, person);
+            if (choice == ConfrontChoice.Mesmerize &&
+                !gameRef.SpendSoulForMesmerize(MesmerizeSoulCost)) return;
+            confrontationSucceeded = UnityEngine.Random.value * 100f < chance;
+            if (confrontationSucceeded)
+            {
+                confrontationHeadingText.text = "THE STRANGER YIELDS";
+                confrontationBodyText.text = choice == ConfrontChoice.Mesmerize
+                    ? "Mesmerism succeeds. The stranger's gaze becomes distant." +
+                      "\nFeeding will be quieter and turning receives +6% chance."
+                    : confrontationMethod + " succeeds. The stranger is subdued." +
+                      "\nYou may now choose how Lucien feeds or whether to turn them.";
+            }
+            else
+            {
+                float penalty = choice == ConfrontChoice.Overpower ? 8f
+                    : choice == ConfrontChoice.Intimidate ? 6f : 11f;
+                confrontationHeadingText.text = "THEY BREAK FREE";
+                confrontationBodyText.text = confrontationMethod + " failed." +
+                    "\nThe stranger breaks away and will flee toward the park exit." +
+                    "\nSuspicion rises now, with more risk if they escape.";
+                gameRef.ReportConfrontationFailure(person, confrontationMethod, penalty);
+            }
+        }
+
+        confrontationResultPending = true;
+        for (int i = 0; i < confrontationChoiceButtons.Length; i++)
+            confrontationChoiceButtons[i].gameObject.SetActive(false);
+        confrontationContinueButton.GetComponentInChildren<TextMeshProUGUI>().text =
+            confrontationSucceeded ? "CONTINUE TO HUNT" : "RETURN TO PARK";
+        confrontationContinueButton.gameObject.SetActive(true);
+        Refresh(gameRef);
+    }
+
+    private void ContinueConfrontation()
+    {
+        if (!confrontationResultPending || gameRef == null) return;
+        MourneveilParkWalker target = confrontationTarget;
+        bool success = confrontationSucceeded;
+        bool mesmerized = confrontationMesmerized;
+        bool backedOff = confrontationBackingOff;
+        string method = confrontationMethod;
+        confrontationOverlay.gameObject.SetActive(false);
+        confrontationTarget = null;
+        confrontationResultPending = false;
+        if (target == null) { Refresh(gameRef); return; }
+        if (success && !gameRef.HuntersAlerted)
+        {
+            target.ResolveConfrontation();
+            markedWalker = -1;
+            gameRef.BeginConfrontedHunt(target.Human, method, mesmerized);
+        }
+        else
+        {
+            // NPC will run visibly toward a park exit AFTER the player has read
+            // the result. BACK OFF carries no additional witness-escape penalty.
+            target.BeginFlightAfterConfrontation(!backedOff);
+            pinnedOutcomeMessage = null;
+            Refresh(gameRef);
+        }
     }
 
     // --------- v0.5: Dynasty management screen ---------
@@ -466,6 +665,7 @@ public class MourneveilParkUI : MonoBehaviour
     private void OpenRoster()
     {
         if (gameRef == null || gameRef.State.currentHuman != null || IsOutcomeVisible ||
+            IsConfrontationVisible ||
             gameRef.State.followers == null || gameRef.State.followers.Count == 0) return;
         if (selectedFollowerId < 0 || gameRef.GetFollower(selectedFollowerId) == null)
             selectedFollowerId = gameRef.State.followers[0].id;
@@ -648,14 +848,16 @@ public class MourneveilParkUI : MonoBehaviour
         MourneveilParkWalker motion = rect.gameObject.AddComponent<MourneveilParkWalker>();
         motion.Initialize(graphic, button, hover, meterBg, meter, meterLabel,
             human, new Vector2(centerX, bottomY), speed, index, controller,
-            OnPasserbyDetected, detectionDifficulty, sneakDetectionMultiplier);
+            OnPasserbyDetected, OnPasserbyEscaped,
+            detectionDifficulty, sneakDetectionMultiplier);
         return motion;
     }
 
     private void Update()
     {
         if (!built || gameRef == null || player == null) return;
-        if ((rosterOverlay != null && rosterOverlay.gameObject.activeSelf) || IsOutcomeVisible) return;
+        if ((rosterOverlay != null && rosterOverlay.gameObject.activeSelf) ||
+            IsOutcomeVisible || IsConfrontationVisible) return;
         if (!MourneveilParkPlayer.InteractJustPressed()) return;
         if (gameRef.State.currentHuman != null || gameRef.HuntersAlerted) return;
 
@@ -665,9 +867,14 @@ public class MourneveilParkUI : MonoBehaviour
             MourneveilParkWalker target = walkers[nearest];
             if (player.IsSprinting) target.ForceSpot(); // Running catches faster, but is conspicuous.
             if (gameRef.HuntersAlerted) return;
-            bool ambush = player.IsSneaking && target.CanAmbush;
             markedWalker = -1;
-            gameRef.FindHuman(target.Human, ambush); // Exactly this NPC and their pre-rolled stats.
+            if (target.IsConfronting)
+            {
+                OpenConfrontation(target); // Strong / brave NPCs demand a real decision.
+                return;
+            }
+            bool ambush = player.IsSneaking && target.CanAmbush;
+            gameRef.FindHuman(target.Human, ambush); // Same NPC and pre-rolled stats.
         }
     }
 
@@ -675,6 +882,43 @@ public class MourneveilParkUI : MonoBehaviour
     {
         if (witness != null && gameRef != null)
             gameRef.ReportDetection(witness.Human);
+    }
+
+    private void OnPasserbyEscaped(MourneveilParkWalker escaping)
+    {
+        if (escaping == null || gameRef == null) return;
+        int i = Array.IndexOf(walkers, escaping);
+        if (i < 0) return;
+        ParkHuman person = escaping.Human;
+        bool shouldReport = escaping.EscapeWillRaiseAlarm;
+        escaping.BeginRespawn();
+        escaping.AssignHuman(gameRef.CreateHumanPreview(i));
+        if (markedWalker == i) markedWalker = -1;
+        pinnedOutcomeMessage = null; // Escapes should also be visible in NIGHT LOG.
+        gameRef.ReportWitnessEscape(person, shouldReport);
+    }
+
+    // Optional manual Play Mode check: makes the guard a guaranteed confronter
+    // without modifying the game's save schema, economy or other NPC types.
+    [ContextMenu("DEV: Prepare guard for confrontation test")]
+    private void PrepareGuardForConfrontationTest()
+    {
+        if (!Application.isPlaying || !built || gameRef == null ||
+            gameRef.State.currentHuman != null || IsOutcomeVisible ||
+            IsConfrontationVisible || gameRef.HuntersAlerted ||
+            walkers[1] == null || !walkers[1].IsAvailable)
+        {
+            Debug.LogWarning("[Mourneveil Park] DEV test unavailable. Enter Play Mode, " +
+                "finish any current hunt, reduce Suspicion below 100, and wait for the guard to respawn.");
+            return;
+        }
+        ParkHuman person = gameRef.CreateHumanPreview(1);
+        person.strength = 94;
+        person.fear = 12;
+        person.willpower = 62;
+        walkers[1].AssignHuman(person);
+        walkers[1].ForceSpot(); // Reports detection once, like ordinary gameplay.
+        Debug.Log("[Mourneveil Park] Guard now confronts Lucien. Walk to them and press E.");
     }
 
     // Clicking a passerby just marks them: no ranged hunting shortcut.
@@ -725,11 +969,15 @@ public class MourneveilParkUI : MonoBehaviour
         if (distance <= interactionRange)
         {
             MourneveilParkWalker npc = walkers[closest];
-            nearbyHintText.text = player.IsSneaking && npc.CanAmbush
-                ? "[ E ]  SILENT AMBUSH  /  BONUS BLOOD + TURN CHANCE"
-                : npc.HasSpottedLucien
-                    ? "[ E ]  CATCH THE WITNESS  /  THEY HAVE SPOTTED YOU"
-                    : "[ E ]  INTERACT  /  HOLD CTRL FOR STEALTH BONUS";
+            nearbyHintText.text = npc.IsConfronting
+                ? "[ E ]  CONFRONT THIS PERSON  /  THEY WILL RESIST"
+                : npc.IsFleeing
+                    ? "[ E ]  CATCH THE FLEEING WITNESS BEFORE THEY ESCAPE"
+                    : player.IsSneaking && npc.CanAmbush
+                        ? "[ E ]  SILENT AMBUSH  /  BONUS BLOOD + TURN CHANCE"
+                        : npc.HasSpottedLucien
+                            ? "[ E ]  CATCH THE WITNESS  /  THEY HAVE SPOTTED YOU"
+                            : "[ E ]  INTERACT  /  HOLD CTRL FOR STEALTH BONUS";
             return;
         }
         if (markedWalker >= 0 && walkers[markedWalker] != null && walkers[markedWalker].IsAvailable)

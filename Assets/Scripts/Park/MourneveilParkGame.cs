@@ -50,6 +50,8 @@ public class ParkProgress
     public ParkHuman currentHuman;
     // v0.4: persisted with the active encounter; old v1 saves default to false.
     public bool currentEncounterAmbush = false;
+    // v0.6: hypnotized confrontation has its own quiet-hunt bonus.
+    public bool currentEncounterMesmerized = false;
     public List<ParkFollower> followers = new List<ParkFollower>();
     public int nextFollowerId = 1;
     public string lastMessage = "The park is quiet. Find someone in the shadows.";
@@ -197,7 +199,8 @@ public class MourneveilParkGame : MonoBehaviour
             int scholars = CountRole(ParkFollowerRole.Scholar);
             float research = Mathf.Min(12f, scholars * 2f);
             return Mathf.Clamp(82f - state.currentHuman.willpower * 0.65f +
-                (state.currentEncounterAmbush ? 8f : 0f) + research, 12f, 94f);
+                (state.currentEncounterAmbush ? 8f : 0f) +
+                (state.currentEncounterMesmerized ? 6f : 0f) + research, 12f, 94f);
         }
     }
 
@@ -280,9 +283,66 @@ public class MourneveilParkGame : MonoBehaviour
         if (state.currentHuman != null || HuntersAlerted || person == null) return;
         state.currentHuman = person;
         state.currentEncounterAmbush = undetected;
+        state.currentEncounterMesmerized = false;
         state.lastMessage = undetected
             ? "You approach unseen. A perfect opening: quiet feeding and turning are easier."
             : "You catch the stranger. They know something is wrong. Choose what Lucien will do.";
+        CommitChange();
+    }
+
+    // v0.6: Successful confrontation begins the same hunting flow as pressing E.
+    // Mesmerism is tracked separately so the UI does not call it a stealth ambush.
+    public void BeginConfrontedHunt(ParkHuman person, string method, bool mesmerized)
+    {
+        if (person == null || state.currentHuman != null || HuntersAlerted) return;
+        state.currentHuman = person;
+        state.currentEncounterAmbush = false;
+        state.currentEncounterMesmerized = mesmerized;
+        state.lastMessage = mesmerized
+            ? "Mesmerism succeeded. The stranger is dazed: quieter feeding and +6 turning chance."
+            : method + " succeeded. The stranger is subdued. Choose what Lucien will do.";
+        CommitChange();
+    }
+
+    // Spending soul is permanent even if the confrontation attempt fails.
+    public bool SpendSoulForMesmerize(float cost)
+    {
+        if (state.currentHuman != null || state.soulIntegrity < cost) return false;
+        state.soulIntegrity = Mathf.Max(0f, state.soulIntegrity - Mathf.Max(0f, cost));
+        state.lastMessage = "Lucien uses Mesmerism (-" + cost.ToString("0") + " Soul Integrity).";
+        CommitChange();
+        return true;
+    }
+
+    public void ReportConfrontationFailure(ParkHuman person, string method, float penalty)
+    {
+        if (person == null || state.currentHuman != null) return;
+        float before = state.suspicion;
+        RaiseSuspicion(Mathf.Max(0f, penalty));
+        state.lastMessage = method + " failed against " + person.title +
+            ". They are fleeing! Suspicion +" + (state.suspicion - before).ToString("0.0") + ".";
+        CommitChange();
+    }
+
+    public void ReportConfrontationBackOff(ParkHuman person)
+    {
+        if (person == null || state.currentHuman != null) return;
+        state.lastMessage = "Lucien backs away from " + person.title +
+            ". The encounter ends without further Suspicion.";
+        CommitChange();
+    }
+
+    // Called once only when a fleeing NPC passes outside the masked park.
+    // An escape creates a NEW random visitor after the respawn cooldown.
+    public void ReportWitnessEscape(ParkHuman person, bool alarmRaised)
+    {
+        if (person == null || state.currentHuman != null) return;
+        float before = state.suspicion;
+        if (alarmRaised) RaiseSuspicion(2.5f + person.intelligence / 45f);
+        state.lastMessage = alarmRaised
+            ? person.title + " escaped from the park and may tell others. Suspicion +" +
+              (state.suspicion - before).ToString("0.0") + "."
+            : person.title + " left the park without raising further alarm.";
         CommitChange();
     }
 
@@ -303,12 +363,14 @@ public class MourneveilParkGame : MonoBehaviour
         if (!CanAct()) return;
         ParkHuman target = state.currentHuman;
         bool ambush = state.currentEncounterAmbush;
+        bool quiet = ambush || state.currentEncounterMesmerized;
         int gained = target.bloodYield + (ambush ? Mathf.CeilToInt(target.bloodYield * 0.25f) : 0);
         state.blood += gained;
         state.humanity = Mathf.Max(0f, state.humanity - 1f);
-        RaiseSuspicion((5f + target.fear / 25f) * (ambush ? 0.5f : 1f));
+        RaiseSuspicion((5f + target.fear / 25f) * (quiet ? 0.5f : 1f));
         CompleteEncounter("You took a little blood (+" + gained + ")." +
-            (ambush ? " Silent approach bonus applied." : " They may remember your face."));
+            (ambush ? " Silent approach bonus applied."
+                : quiet ? " Mesmerism kept the feeding discreet." : " They may remember your face."));
     }
 
     public void FeedAndEraseMemory()
@@ -316,11 +378,13 @@ public class MourneveilParkGame : MonoBehaviour
         if (!CanAct()) return;
         ParkHuman target = state.currentHuman;
         bool ambush = state.currentEncounterAmbush;
+        bool quiet = ambush || state.currentEncounterMesmerized;
         int gained = Mathf.Max(3, target.bloodYield - 5) + (ambush ? 3 : 0);
         state.blood += gained;
-        RaiseSuspicion(ambush ? 0.5f : 2f);
+        RaiseSuspicion(quiet ? 0.5f : 2f);
         CompleteEncounter("The human survives, confused. Their memories fade. Blood +" + gained + "." +
-            (ambush ? " Silent approach bonus applied." : ""));
+            (ambush ? " Silent approach bonus applied."
+                : quiet ? " Mesmerism kept the feeding discreet." : ""));
     }
 
     public void DrainHuman()
@@ -361,13 +425,13 @@ public class MourneveilParkGame : MonoBehaviour
                 appearanceIndex = target.appearanceIndex,
                 role = ParkFollowerRole.Hunter
             });
-            RaiseSuspicion(state.currentEncounterAmbush ? 2.5f : 5f);
+            RaiseSuspicion(state.currentEncounterAmbush || state.currentEncounterMesmerized ? 2.5f : 5f);
             CompleteEncounter("Turning succeeded! A new vampire joins your Dynasty as a Hunter (+" +
                 production.ToString("0.00") + " Blood/sec). Open MANAGE DYNASTY to assign roles.");
         }
         else
         {
-            RaiseSuspicion(state.currentEncounterAmbush ? 14f : 18f);
+            RaiseSuspicion(state.currentEncounterAmbush || state.currentEncounterMesmerized ? 14f : 18f);
             CompleteEncounter("Turning failed. Your soul weakened (-18), and rumours spread through the park.");
         }
     }
@@ -474,6 +538,7 @@ public class MourneveilParkGame : MonoBehaviour
     {
         state.currentHuman = null;
         state.currentEncounterAmbush = false;
+        state.currentEncounterMesmerized = false;
         state.encountersResolved++;
         state.lastMessage = message;
         if (HuntersAlerted)
@@ -508,7 +573,11 @@ public class MourneveilParkGame : MonoBehaviour
             }
             if (state.followers == null) state.followers = new List<ParkFollower>();
             MigrateFollowers();
-            if (state.currentHuman == null) state.currentEncounterAmbush = false;
+            if (state.currentHuman == null)
+            {
+                state.currentEncounterAmbush = false;
+                state.currentEncounterMesmerized = false;
+            }
             state.humanity = Mathf.Clamp(state.humanity, 0f, 100f);
             state.soulIntegrity = Mathf.Clamp(state.soulIntegrity, 0f, 100f);
             state.suspicion = Mathf.Clamp(state.suspicion, 0f, 100f);

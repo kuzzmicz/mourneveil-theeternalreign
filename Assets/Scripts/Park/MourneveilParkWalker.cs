@@ -20,6 +20,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
     private RectTransform rect;
     private MourneveilParkPlayer player;
     private Action<MourneveilParkWalker> onDetected;
+    private Action<MourneveilParkWalker> onEscaped;
     private ParkHuman human;
     private Vector2 home;
     private Vector2 position;
@@ -38,12 +39,18 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
     private bool usesSprite;
     private bool spotted;
     private bool confronting;
+    private bool fleeing;
+    private bool alarmOnEscape;
+    private float fleeDirection;
     private bool approachCompromised;
 
     public Vector2 ParkPosition { get { return position; } }
     public ParkHuman Human { get { return human; } }
     public float Awareness { get { return awareness; } }
     public bool HasSpottedLucien { get { return spotted; } }
+    public bool IsConfronting { get { return IsAvailable && spotted && confronting; } }
+    public bool IsFleeing { get { return initialized && cooldown <= 0f && fleeing; } }
+    public bool EscapeWillRaiseAlarm { get { return alarmOnEscape && spotted; } }
     public bool CanAmbush { get { return IsAvailable && !spotted && !approachCompromised && awareness < 45f; } }
     public bool IsAvailable { get { return initialized && cooldown <= 0f && !locked; } }
 
@@ -52,6 +59,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
         ParkHuman generatedHuman, Vector2 homePosition, float walkSpeed,
         int id, MourneveilParkPlayer controller,
         Action<MourneveilParkWalker> detectedCallback,
+        Action<MourneveilParkWalker> escapedCallback,
         float difficulty, float sneakingMultiplier)
     {
         artwork = image;
@@ -70,6 +78,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
         index = id;
         player = controller;
         onDetected = detectedCallback;
+        onEscaped = escapedCallback;
         detectionDifficulty = Mathf.Max(0.1f, difficulty);
         sneakMultiplier = Mathf.Clamp(sneakingMultiplier, 0.05f, 1f);
         human = generatedHuman;
@@ -86,11 +95,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
     {
         if (!IsAvailable || spotted || human == null) return;
         awareness = 100f;
-        spotted = true;
-        confronting = human.strength >= 72 && human.fear <= 48;
-        approachCompromised = true;
-        if (onDetected != null) onDetected(this);
-        UpdateAwarenessVisuals();
+        TriggerAlert();
     }
 
     public void AssignHuman(ParkHuman replacement)
@@ -99,10 +104,32 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
         awareness = 0f;
         spotted = false;
         confronting = false;
+        fleeing = false;
+        alarmOnEscape = false;
+        fleeDirection = 0f;
         approachCompromised = false;
         marked = false;
         hovered = false;
         UpdateAwarenessVisuals();
+    }
+
+    // Called after a confrontation is resolved. Successful attacks then use the
+    // existing hunt screen, while failures let this same NPC escape normally.
+    public void ResolveConfrontation()
+    {
+        confronting = false;
+        fleeing = false;
+    }
+
+    public void BeginFlightAfterConfrontation(bool reportIfEscaped)
+    {
+        if (!initialized || cooldown > 0f) return;
+        confronting = false;
+        fleeing = true;
+        spotted = true;
+        approachCompromised = true;
+        alarmOnEscape = reportIfEscaped;
+        ChooseFleeDirection();
     }
 
     public void SetState(bool isSelected, bool isLocked)
@@ -122,14 +149,33 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
     {
         cooldown = UnityEngine.Random.Range(4.5f, 8f);
         position = new Vector2(Mathf.Clamp(home.x + UnityEngine.Random.Range(-95f, 95f), -495f, 495f),
-            Mathf.Clamp(home.y + UnityEngine.Random.Range(-25f, 25f), 80f, 135f));
+            Mathf.Clamp(home.y + UnityEngine.Random.Range(-25f, 25f), 75f, 165f));
         home = position;
         awareness = 0f;
         spotted = false;
         confronting = false;
+        fleeing = false;
+        alarmOnEscape = false;
+        fleeDirection = 0f;
         approachCompromised = false;
         marked = false;
         hovered = false;
+        // Immediately hide a visitor who has left the camera, rather than
+        // fading their old sprite across the path during the respawn delay.
+        if (artwork != null)
+        {
+            Color color = artwork.color;
+            color.a = 0f;
+            artwork.color = color;
+        }
+        if (hoverLabel != null)
+        {
+            Color labelColor = hoverLabel.color;
+            labelColor.a = 0f;
+            hoverLabel.color = labelColor;
+        }
+        if (button != null) button.interactable = false;
+        UpdateAwarenessVisuals();
     }
 
     private void Update()
@@ -145,17 +191,31 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
             float distance = away.magnitude;
             UpdateDetection(distance, dt);
 
-            if (spotted && confronting)
+            // A very nervous person can bolt before fully identifying Lucien.
+            if (!spotted && !fleeing && awareness >= 85f && !player.IsSneaking)
+                StartFlight(false);
+
+            if (fleeing)
             {
-                // A brave/strong NPC stands their ground, but can still be caught.
-                position += away.normalized * 9f * dt;
+                // Run HORIZONTALLY through the edge of the masked park, never
+                // clamp at its boundary. Keep feet on the cobblestone path.
+                float fleeSpeed = 140f + human.fear * 0.42f + human.stealth * 0.36f;
+                position.x += fleeDirection * fleeSpeed * dt;
+                position.y = Mathf.MoveTowards(position.y, Mathf.Clamp(home.y, 75f, 165f), 35f * dt);
+                RectTransform world = rect.parent as RectTransform;
+                float halfWidth = world != null ? world.rect.width * 0.5f : 582.5f;
+                float despawnAt = halfWidth + rect.rect.width * 0.5f + 3f;
+                if (Mathf.Abs(position.x) >= despawnAt)
+                {
+                    // Callback immediately schedules the next visitor; run ONCE.
+                    if (onEscaped != null) onEscaped(this);
+                    else BeginRespawn();
+                    return;
+                }
             }
-            else if (spotted || (awareness > 68f && !player.IsSneaking))
+            else if (spotted && confronting)
             {
-                // Fearful NPCs flee; high stealth makes them faster at escape.
-                float fleeSpeed = 98f + human.fear * 0.36f + human.stealth * 0.33f;
-                if (away.sqrMagnitude > 0.01f)
-                    position += away.normalized * fleeSpeed * dt;
+                // Holds ground, awaiting E -> actual confrontation choices.
             }
             else
             {
@@ -163,9 +223,9 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
                 Vector2 destination = home + new Vector2(Mathf.Sin(time * 0.53f) * 78f,
                     Mathf.Sin(time * 0.33f + phase) * 20f);
                 position = Vector2.MoveTowards(position, destination, (53f + index * 7f) * dt);
+                position.x = Mathf.Clamp(position.x, -520f, 520f);
+                position.y = Mathf.Clamp(position.y, 75f, 165f);
             }
-            position.x = Mathf.Clamp(position.x, -520f, 520f);
-            position.y = Mathf.Clamp(position.y, 75f, 135f);
         }
 
         rect.anchoredPosition = position;
@@ -188,7 +248,7 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
             bool show = visible && !locked && (hovered || marked || spotted || awareness >= 45f);
             c.a = Mathf.MoveTowards(c.a, show ? 1f : 0f, dt * 8f);
             hoverLabel.color = c;
-            hoverLabel.text = spotted ? (confronting ? "CONFRONTING" : "FLEEING")
+            hoverLabel.text = confronting ? "CONFRONTING" : fleeing ? "FLEEING"
                 : awareness >= 45f ? "SUSPICIOUS" : marked ? "MARKED" : "MARK";
         }
         Vector3 desiredScale = Vector3.one * (selected ? 1.08f : hovered || marked ? 1.05f : 1f);
@@ -226,11 +286,38 @@ public sealed class MourneveilParkWalker : MonoBehaviour, IPointerEnterHandler, 
         else
             awareness = Mathf.Max(0f, awareness - 26f * dt);
 
-        if (awareness >= 100f)
+        if (awareness >= 100f) TriggerAlert();
+    }
+
+    private void TriggerAlert()
+    {
+        if (spotted || human == null) return;
+        spotted = true; // Once per spawn: detection itself is charged just once.
+        confronting = human.strength >= 72 && human.fear <= 48;
+        if (!confronting) StartFlight(true);
+        else fleeing = false;
+        approachCompromised = true;
+        if (onDetected != null) onDetected(this);
+        UpdateAwarenessVisuals();
+    }
+
+    private void StartFlight(bool raiseAlarm)
+    {
+        fleeing = true;
+        confronting = false;
+        alarmOnEscape = raiseAlarm;
+        ChooseFleeDirection();
+    }
+
+    private void ChooseFleeDirection()
+    {
+        if (player == null)
+            fleeDirection = position.x >= 0f ? 1f : -1f;
+        else
         {
-            spotted = true; // Once per spawn: don't repeatedly charge global Suspicion.
-            confronting = human.strength >= 72 && human.fear <= 48;
-            if (onDetected != null) onDetected(this);
+            float delta = position.x - player.ParkPosition.x;
+            fleeDirection = Mathf.Abs(delta) > 1f ? Mathf.Sign(delta)
+                : (position.x >= 0f ? 1f : -1f);
         }
     }
 
