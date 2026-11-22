@@ -208,6 +208,46 @@ MonoBehaviour:
   lucienRunFps: 12
   lucienSneakFps: 4
   npcMinMoveSpeed: 2
+  lucienWalkRight:
+  - {fileID: 21300000, guid: a043109eb2847d246bd5bab0d748bc1a, type: 3}
+  - {fileID: 21300000, guid: d4231c812406f1942b36fd4f24d60c11, type: 3}
+  - {fileID: 21300000, guid: 35ec6885111bf634891ab8444b7126eb, type: 3}
+  - {fileID: 21300000, guid: 24249213227c6bc458231ceb467725fc, type: 3}
+  lucienWalkLeft:
+  - {fileID: 21300000, guid: c17b9ac86b93a22488b460f352e9dfb4, type: 3}
+  - {fileID: 21300000, guid: 6e7f1f9e910ae8b4a9878a78018268a3, type: 3}
+  - {fileID: 21300000, guid: 04458d76f7314024e9958fc60711e162, type: 3}
+  - {fileID: 21300000, guid: d0ab387ef3a66ea46886414d3dce8cb2, type: 3}
+  studentWalkRight:
+  - {fileID: 21300000, guid: 9e65f0f0052a2d347932edb32aa488d4, type: 3}
+  - {fileID: 21300000, guid: 204211b26f256194f85e49b10e018d61, type: 3}
+  - {fileID: 21300000, guid: eafd1f63982228c45815c30bb8f3745c, type: 3}
+  - {fileID: 21300000, guid: dc01d8aa20d2da048b6eb5f4354a9f27, type: 3}
+  studentWalkLeft:
+  - {fileID: 21300000, guid: 6c6b813d98881524898a867c57058561, type: 3}
+  - {fileID: 21300000, guid: 53c359e9145919f44ab260a49a02815b, type: 3}
+  - {fileID: 21300000, guid: 9abb7572d86131f4db6cf024bf5eb9f6, type: 3}
+  - {fileID: 21300000, guid: 96ab2197f57713049914682f53693755, type: 3}
+  guardWalkRight:
+  - {fileID: 21300000, guid: 1f2c607a2d4ef1446893e657aca85344, type: 3}
+  - {fileID: 21300000, guid: 3647fe5696e03974fa75a7feefb7f0bf, type: 3}
+  - {fileID: 21300000, guid: bc8456f003fd7764fbd928d048a6afe6, type: 3}
+  - {fileID: 21300000, guid: 3f4c8d31e04620349a5844afcc924bd0, type: 3}
+  guardWalkLeft:
+  - {fileID: 21300000, guid: 0ba6b498238f97a49995edcf90288681, type: 3}
+  - {fileID: 21300000, guid: 87fe14af6ad387843ac7393db4bddb57, type: 3}
+  - {fileID: 21300000, guid: 288929f0681822c40b250fc187af670a, type: 3}
+  - {fileID: 21300000, guid: 75329d07ab268854fb3240c7c39cd8a4, type: 3}
+  wandererWalkRight:
+  - {fileID: 21300000, guid: a0c04cddd70c5414796ab33d5f184fd0, type: 3}
+  - {fileID: 21300000, guid: 15487bdf17869ec439013915d2561a3b, type: 3}
+  - {fileID: 21300000, guid: 36f23f3faf6894f4da7fcffcb32fa60f, type: 3}
+  - {fileID: 21300000, guid: 1372127f269f36f4b80c443ecbe21e44, type: 3}
+  wandererWalkLeft:
+  - {fileID: 21300000, guid: bc881fae06fd52d42ae83c1a34049b28, type: 3}
+  - {fileID: 21300000, guid: 72fa8c298485c204b9c238f758d5f681, type: 3}
+  - {fileID: 21300000, guid: 870901acb5bbd0247bf235aa7f3b5fbe, type: 3}
+  - {fileID: 21300000, guid: 4dd4f47d888733d4285cdd2019052a5c, type: 3}
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
