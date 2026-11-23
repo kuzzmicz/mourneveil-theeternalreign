@@ -207,6 +207,7 @@ MonoBehaviour:
   lucienWalkFps: 8
   lucienRunFps: 12
   lucienSneakFps: 4
+  npcFleeFps: 12
   npcMinMoveSpeed: 2
   lucienWalkRight:
   - {fileID: 21300000, guid: a043109eb2847d246bd5bab0d748bc1a, type: 3}
@@ -248,6 +249,48 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 72fa8c298485c204b9c238f758d5f681, type: 3}
   - {fileID: 21300000, guid: 870901acb5bbd0247bf235aa7f3b5fbe, type: 3}
   - {fileID: 21300000, guid: 4dd4f47d888733d4285cdd2019052a5c, type: 3}
+  lucienSneakRight:
+  - {fileID: 21300000, guid: d0869b1e8f6eba14795f1449351b52a0, type: 3}
+  - {fileID: 21300000, guid: 2e0db00a636e7404a8de963360a2ed1d, type: 3}
+  - {fileID: 21300000, guid: 21982628d52ae174c8794ccbd0b09871, type: 3}
+  - {fileID: 21300000, guid: 1ac4444f43196a84abfd3f1431515e5e, type: 3}
+  lucienRunRight:
+  - {fileID: 21300000, guid: 69a8a3d70ddd86740bc084e2f1383b60, type: 3}
+  - {fileID: 21300000, guid: 5416e7d0b6d926b4bb2e33a31e53c818, type: 3}
+  - {fileID: 21300000, guid: aa65edf6dcb108d478547453c23362a4, type: 3}
+  - {fileID: 21300000, guid: 1f558c0d1de56504b83da26f8e675000, type: 3}
+  studentRunRight:
+  - {fileID: 21300000, guid: 21f43ff08a593144bbb30a4dd7e34f4f, type: 3}
+  - {fileID: 21300000, guid: c2fa5ba230a8d604cb19f10daf5ec9a8, type: 3}
+  - {fileID: 21300000, guid: 5c1a40363be3e894dbcc8b458fb9bbe8, type: 3}
+  - {fileID: 21300000, guid: b843573a1b85a4441a5bb38b07b0f9f9, type: 3}
+  studentRunLeft:
+  - {fileID: 21300000, guid: 7053a0056b2a03045aa00492b600658d, type: 3}
+  - {fileID: 21300000, guid: 98bb6034d7dcd1049b815bce13ca4b7d, type: 3}
+  - {fileID: 21300000, guid: d983a25bb7a9bea4aa8fc83f229e5a31, type: 3}
+  - {fileID: 21300000, guid: e3a034d0201fb4c4aa6d36dc248ce0cc, type: 3}
+  guardRunRight:
+  - {fileID: 21300000, guid: 684e157975229e047ad1a9bef69c1ea1, type: 3}
+  - {fileID: 21300000, guid: 25c095dc7c7241b4db2fba2bdb23703f, type: 3}
+  - {fileID: 21300000, guid: 0ef2e5610270d9d459ebb157a455c7e9, type: 3}
+  - {fileID: 21300000, guid: 733c048b7856f91429201b68227b8a61, type: 3}
+  guardRunLeft:
+  - {fileID: 21300000, guid: 85db2f99b25c90e48952a36d92453455, type: 3}
+  - {fileID: 21300000, guid: a2ecc1cef8ab55d48b71b7c5a0bf9479, type: 3}
+  - {fileID: 21300000, guid: 95983bccc9d10044e93cc4f4229e8651, type: 3}
+  - {fileID: 21300000, guid: d39446270f58a1f46947c98349e2193a, type: 3}
+  wandererRunRight:
+  - {fileID: 21300000, guid: 33cd1cc0509843f42aa6c673b193995b, type: 3}
+  - {fileID: 21300000, guid: 7446f5da5c0ff2e44851841d62927157, type: 3}
+  - {fileID: 21300000, guid: 8145a7379d36c5f4abd0c4c3d8b84a6b, type: 3}
+  - {fileID: 21300000, guid: f1ec6a01488e17943bfd8b896483b696, type: 3}
+  wandererRunLeft:
+  - {fileID: 21300000, guid: 47c9c6b0c8364cc46a27ca848e81018f, type: 3}
+  - {fileID: 21300000, guid: aab973a50530bd84098ae8bdb5456884, type: 3}
+  - {fileID: 21300000, guid: 2ff7ead3fd0353e488f07f5784d8ba93, type: 3}
+  - {fileID: 21300000, guid: 13089017d7645814bb673cd1dd5ee219, type: 3}
+  showConfrontationExclamation: 1
+  confrontationRedPulse: 0.22
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
