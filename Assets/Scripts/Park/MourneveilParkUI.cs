@@ -5,9 +5,10 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// Mourneveil Park v0.6: Flight to park edge + playable confrontation choices.
-// Preserves Dynasty Management and readable acknowledged hunt outcomes.
-// Generates its UI at runtime; no prefabs or editor scripts are required.
+// Mourneveil Park v0.8: enlarged park, contextual hunt panel, sliding Dynasty drawer.
+// Based on the working v0.6 Park UI; maintains v0.7 animation compatibility,
+// v0.5 readable hunt results, and full confrontation and Dynasty Management logic.
+// UI is generated at runtime; no manually created UI elements are required.
 [DisallowMultipleComponent]
 public class MourneveilParkUI : MonoBehaviour
 {
@@ -37,6 +38,28 @@ public class MourneveilParkUI : MonoBehaviour
     private TMP_Text networkButtonLabel, layLowButtonLabel;
     private Button leaveButton, smallButton, eraseButton, drainButton, turnButton;
     private Button networkButton, layLowButton, manageDynastyButton;
+
+    // v0.8 — dynamic overlay panels. The park keeps its original local movement
+    // coordinate system while being enlarged visually using localScale.
+    [Header("v0.8 — UI Reflow")]
+    [SerializeField, Range(1.0f, 1.65f)] private float parkViewScale = 1.54f;
+    [SerializeField, Range(400f, 2400f)] private float panelSlideSpeed = 1500f;
+    [SerializeField] private bool openDynastyDrawerAtStart = false;
+    private RectTransform huntPanelRect;
+    private CanvasGroup huntPanelGroup;
+    private RectTransform dynastyDrawerRect;
+    private CanvasGroup dynastyDrawerGroup;
+    private Button dynastyToggleButton;
+    private TMP_Text dynastyToggleLabel;
+    private bool huntPanelRequested;
+    private bool dynastyDrawerRequested;
+    private const float HuntX = 362f;
+    private const float HuntOpenY = 714f;
+    private const float HuntHiddenY = 1108f;
+    private const float DynastyOpenX = 1250f;
+    private const float DynastyHiddenX = 1955f;
+    private const float DynastyY = 210f;
+
 
     // v0.5 - Modal Dynasty roster, generated without custom prefabs.
     private RectTransform rosterOverlay, rosterListContent;
@@ -119,12 +142,13 @@ public class MourneveilParkUI : MonoBehaviour
         Image globalShade = AddImage("Fullscreen Dark Tint", root, new Color(0.025f, 0.008f, 0.018f, 0.83f));
         Stretch((RectTransform)globalShade.transform);
 
+        // Slimmer HUD: the upper bar no longer occupies a quarter of the screen.
         TMP_Text title = AddText("Title", root, "MOURNEVEIL   /   CHAPTER II : THE FIRST HUNT",
-            37, ivory, TextAlignmentOptions.Left);
-        Place(title.rectTransform, 55, 18, 1780, 55);
+            27, ivory, TextAlignmentOptions.Left);
+        Place(title.rectTransform, 55, 7, 1780, 39);
         TMP_Text subtitle = AddText("Subtitle", root,
-            "The city sleeps. Its heartbeats do not.", 23, muted, TextAlignmentOptions.Left);
-        Place(subtitle.rectTransform, 56, 76, 1750, 35);
+            "The city sleeps. Its heartbeats do not.", 17, muted, TextAlignmentOptions.Left);
+        Place(subtitle.rectTransform, 56, 41, 1750, 25);
 
         bloodText = StatBox(root, "Blood", 55);
         humanityText = StatBox(root, "Humanity", 516);
@@ -132,7 +156,11 @@ public class MourneveilParkUI : MonoBehaviour
         suspicionText = StatBox(root, "Suspicion", 1438);
 
         // Playable UI-space park. The player must approach an NPC and press E.
-        RectTransform world = Frame("Moonlit Park", root, 55, 239, 1165, 486);
+        // Enlarge the complete park as one unit: artwork, avatar, NPC positions,
+        // awareness labels and masks all scale consistently. The *logic* continues
+        // using the same 1165x486 local coordinates (important for v0.6 AI).
+        RectTransform world = Frame("Moonlit Park", root, 55, 150, 1165, 486);
+        world.localScale = new Vector3(parkViewScale, parkViewScale, 1f);
         world.gameObject.AddComponent<RectMask2D>();
         Image parkImage = AddImage("Park Artwork", world, Color.white);
         if (game.Background != null)
@@ -179,7 +207,12 @@ public class MourneveilParkUI : MonoBehaviour
         Place(nearbyHintText.rectTransform, 155, 440, 855, 33);
 
         // A single encounter panel is below the world. Nothing blocks walking in the park.
-        RectTransform actions = Frame("Hunt Actions", root, 55, 742, 1165, 281);
+        RectTransform actions = Frame("Hunt Actions", root, HuntX, HuntHiddenY, 1165, 281);
+        huntPanelRect = actions;
+        huntPanelGroup = actions.gameObject.AddComponent<CanvasGroup>();
+        huntPanelGroup.alpha = 0f;
+        huntPanelGroup.interactable = false;
+        huntPanelGroup.blocksRaycasts = false;
         encounterTitleText = AddText("Selected Person", actions,
             "MOVE CLOSE TO A PASSERBY AND PRESS E", 27, ivory, TextAlignmentOptions.Left);
         Place(encounterTitleText.rectTransform, 23, 10, 1110, 36);
@@ -199,7 +232,18 @@ public class MourneveilParkUI : MonoBehaviour
             18, muted, TextAlignmentOptions.Left);
         Place(encounterHintText.rectTransform, 23, 248, 1110, 30);
 
-        RectTransform dynasty = Frame("Dynasty", root, 1240, 239, 625, 784);
+        RectTransform dynasty = Frame("Dynasty", root, DynastyHiddenX, DynastyY, 625, 784);
+        // Stop clicks from passing through the open sidebar to NPCs behind it.
+        Image dynastyBackdrop = dynasty.GetChild(0).GetComponent<Image>();
+        if (dynastyBackdrop != null) dynastyBackdrop.raycastTarget = true;
+        dynastyDrawerRect = dynasty;
+        dynastyDrawerGroup = dynasty.gameObject.AddComponent<CanvasGroup>();
+        dynastyDrawerRequested = openDynastyDrawerAtStart;
+        dynastyDrawerRect.anchoredPosition = new Vector2(
+            dynastyDrawerRequested ? DynastyOpenX : DynastyHiddenX, -DynastyY);
+        dynastyDrawerGroup.alpha = dynastyDrawerRequested ? 1f : 0f;
+        dynastyDrawerGroup.interactable = dynastyDrawerRequested;
+        dynastyDrawerGroup.blocksRaycasts = dynastyDrawerRequested;
         TMP_Text dynastyTitle = AddText("Dynasty Title", dynasty, "THE DYNASTY",
             34, ivory, TextAlignmentOptions.Left);
         Place(dynastyTitle.rectTransform, 25, 23, 570, 49);
@@ -228,6 +272,12 @@ public class MourneveilParkUI : MonoBehaviour
             muted, TextAlignmentOptions.TopLeft);
         Place(resultText.rectTransform, 25, 685, 570, 84);
 
+        // Pinned above the drawer; always usable even while the drawer is closed.
+        dynastyToggleButton = MakeButton(root, "DYNASTY DRAWER TOGGLE",
+            1616f, 230f, 248f, 47f, ToggleDynastyDrawer);
+        dynastyToggleLabel = dynastyToggleButton.GetComponentInChildren<TextMeshProUGUI>();
+        UpdateDynastyToggleLabel();
+
         BuildDynastyRoster(root);
         BuildConfrontationOverlay(root);
         BuildOutcomePopup(root); // Last sibling: always above the rest of the park UI.
@@ -245,6 +295,17 @@ public class MourneveilParkUI : MonoBehaviour
 
         ParkHuman person = state.currentHuman;
         bool engaged = person != null;
+        // An encounter takes precedence over the optional Dynasty drawer.
+        huntPanelRequested = engaged;
+        if (engaged && dynastyDrawerRequested)
+        {
+            dynastyDrawerRequested = false;
+            UpdateDynastyToggleLabel();
+        }
+        if (dynastyToggleButton != null)
+            dynastyToggleButton.interactable = !engaged && !IsOutcomeVisible &&
+                !IsConfrontationVisible &&
+                !(rosterOverlay != null && rosterOverlay.gameObject.activeSelf);
         if (engaged)
         {
             encounterTitleText.text = person.title.ToUpperInvariant();
@@ -856,6 +917,7 @@ public class MourneveilParkUI : MonoBehaviour
     private void Update()
     {
         if (!built || gameRef == null || player == null) return;
+        AnimateReflowPanels();
         if ((rosterOverlay != null && rosterOverlay.gameObject.activeSelf) ||
             IsOutcomeVisible || IsConfrontationVisible) return;
         if (!MourneveilParkPlayer.InteractJustPressed()) return;
@@ -1027,11 +1089,57 @@ public class MourneveilParkUI : MonoBehaviour
         return controller;
     }
 
+    // -------- v0.8 UI reflow: no Editor tools, no new GameObjects in the scene. --------
+    private void ToggleDynastyDrawer()
+    {
+        if (!built || gameRef == null || gameRef.State.currentHuman != null ||
+            IsOutcomeVisible || IsConfrontationVisible ||
+            (rosterOverlay != null && rosterOverlay.gameObject.activeSelf)) return;
+        dynastyDrawerRequested = !dynastyDrawerRequested;
+        UpdateDynastyToggleLabel();
+    }
+
+    private void UpdateDynastyToggleLabel()
+    {
+        if (dynastyToggleLabel != null)
+            dynastyToggleLabel.text = dynastyDrawerRequested
+                ? "CLOSE DYNASTY   X" : "DYNASTY   <";
+    }
+
+    private void AnimateReflowPanels()
+    {
+        float speed = panelSlideSpeed * Time.unscaledDeltaTime;
+        float opacityStep = Mathf.Clamp01(Time.unscaledDeltaTime * 8f);
+
+        if (huntPanelRect != null && huntPanelGroup != null)
+        {
+            Vector2 target = new Vector2(HuntX, -(huntPanelRequested ? HuntOpenY : HuntHiddenY));
+            huntPanelRect.anchoredPosition = Vector2.MoveTowards(
+                huntPanelRect.anchoredPosition, target, speed);
+            huntPanelGroup.alpha = Mathf.MoveTowards(huntPanelGroup.alpha,
+                huntPanelRequested ? 1f : 0f, opacityStep);
+            huntPanelGroup.interactable = huntPanelRequested;
+            huntPanelGroup.blocksRaycasts = huntPanelRequested;
+        }
+
+        if (dynastyDrawerRect != null && dynastyDrawerGroup != null)
+        {
+            Vector2 target = new Vector2(
+                dynastyDrawerRequested ? DynastyOpenX : DynastyHiddenX, -DynastyY);
+            dynastyDrawerRect.anchoredPosition = Vector2.MoveTowards(
+                dynastyDrawerRect.anchoredPosition, target, speed);
+            dynastyDrawerGroup.alpha = Mathf.MoveTowards(dynastyDrawerGroup.alpha,
+                dynastyDrawerRequested ? 1f : 0f, opacityStep);
+            dynastyDrawerGroup.interactable = dynastyDrawerRequested;
+            dynastyDrawerGroup.blocksRaycasts = dynastyDrawerRequested;
+        }
+    }
+
     private TMP_Text StatBox(Transform parent, string name, float x)
     {
-        RectTransform frame = Frame(name + " Box", parent, x, 123, 425, 93);
-        TMP_Text text = AddText(name + " Text", frame, name, 24, ivory, TextAlignmentOptions.TopLeft);
-        Place(text.rectTransform, 18, 9, 400, 78);
+        RectTransform frame = Frame(name + " Box", parent, x, 73, 425, 67);
+        TMP_Text text = AddText(name + " Text", frame, name, 20, ivory, TextAlignmentOptions.TopLeft);
+        Place(text.rectTransform, 14, 5, 400, 62);
         return text;
     }
 
