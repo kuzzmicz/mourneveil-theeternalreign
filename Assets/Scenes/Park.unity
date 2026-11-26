@@ -131,6 +131,7 @@ GameObject:
   - component: {fileID: 400896998}
   - component: {fileID: 400897000}
   - component: {fileID: 400897001}
+  - component: {fileID: 400897002}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -156,6 +157,9 @@ MonoBehaviour:
   naturalSuspicionDecreasePerSecond: 0.12
   enableOfflineBlood: 1
   offlineHoursCap: 2
+  hunterSneakDetectionMultiplier: 0.55
+  playerIsSneaking: 0
+  latestNightLog: The night is still. No hunter has noticed you yet.
 --- !u!4 &400896999
 Transform:
   m_ObjectHideFlags: 0
@@ -191,6 +195,9 @@ MonoBehaviour:
   detectionDifficulty: 1
   sneakDetectionMultiplier: 0.22
   showHuntOutcomePopup: 1
+  parkViewScale: 1.54
+  panelSlideSpeed: 1500
+  openDynastyDrawerAtStart: 0
 --- !u!114 &400897001
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -291,6 +298,70 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 13089017d7645814bb673cd1dd5ee219, type: 3}
   showConfrontationExclamation: 1
   confrontationRedPulse: 0.22
+--- !u!114 &400897002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1cd2fd96bed13ad46bd879aff51dc13c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilHunter
+  parkGame: {fileID: 400896998}
+  idleRight: {fileID: 21300000, guid: f6c3fd91404c87541bede69e7a46474c, type: 3}
+  idleLeft: {fileID: 21300000, guid: 690d6db73f3495b4c8a7f562630a6407, type: 3}
+  runRight: {fileID: 21300000, guid: bf2211f2a66c41d4bafe936120457f93, type: 3}
+  runLeft: {fileID: 21300000, guid: 9e212cb1ad4a79e49b7acbbae8cc0f1a, type: 3}
+  walkRightFrames:
+  - {fileID: 21300000, guid: b792ad708ea611c4d91c7136418f8bcb, type: 3}
+  - {fileID: 21300000, guid: c09f85df081a2ac49a00b290f62c015f, type: 3}
+  - {fileID: 21300000, guid: ec2bae7c7844eb341bbf5933c56bd14e, type: 3}
+  - {fileID: 21300000, guid: 155d7b008f2bc974bbbb3a9037169a48, type: 3}
+  walkLeftFrames:
+  - {fileID: 21300000, guid: e19d96c17ac902f4cbf982bbf3b7dbb3, type: 3}
+  - {fileID: 21300000, guid: 5452fd04c6268aa4a9f658b873b9a794, type: 3}
+  - {fileID: 21300000, guid: 6f69d9997bab83b4ebb9cb678cc96e6b, type: 3}
+  - {fileID: 21300000, guid: 2223d2a07aaef6e4287c2462ec3a5ded, type: 3}
+  runRightFrames:
+  - {fileID: 21300000, guid: bf2211f2a66c41d4bafe936120457f93, type: 3}
+  - {fileID: 21300000, guid: fbd9a20d4400eb84582ca55d32ac7a02, type: 3}
+  - {fileID: 21300000, guid: d7f2cf0a463e83540b08f0b07244fe95, type: 3}
+  - {fileID: 21300000, guid: cd83919a67be04344b6fa7810a01c364, type: 3}
+  runLeftFrames:
+  - {fileID: 21300000, guid: 9e212cb1ad4a79e49b7acbbae8cc0f1a, type: 3}
+  - {fileID: 21300000, guid: 0219f66b2bcae5e4db0fa99964b4c2d5, type: 3}
+  - {fileID: 21300000, guid: 3fa510cd68c6ad64aaad0a2dc361a07c, type: 3}
+  - {fileID: 21300000, guid: 8c221b6a198bc314fa98e4b730052c8f, type: 3}
+  walkFrameTime: 0.18
+  runFrameTime: 0.12
+  suspicionToAppear: 50
+  suspicionToLeave: 25
+  leftEdge: -500
+  rightEdge: 500
+  pathY: 100
+  patrolSpeed: 110
+  chaseSpeed: 220
+  visionRange: 170
+  verticalVisionRange: 115
+  sneakVisionMultiplier: 0.3
+  sprintVisionMultiplier: 1.15
+  sprintHearingRange: 85
+  walkDetectionPerSecond: 0.62
+  sneakDetectionPerSecond: 0.12
+  sprintDetectionPerSecond: 1.3
+  awarenessDecayPerSecond: 0.75
+  investigateThreshold: 0.3
+  investigateDuration: 1.8
+  loseSightDuration: 2
+  catchRange: 40
+  bloodPenalty: 30
+  suspicionPenalty: 10
+  afterCatchCooldown: 6
+  spawnGraceSeconds: 2.5
+  showAwarenessIcon: 1
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0

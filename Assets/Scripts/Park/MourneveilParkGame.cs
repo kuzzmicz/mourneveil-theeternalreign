@@ -74,6 +74,13 @@ public class MourneveilParkGame : MonoBehaviour
     [SerializeField] private bool enableOfflineBlood = true;
     [SerializeField, Range(0f, 4f)] private float offlineHoursCap = 2f;
 
+    [Header("Hunter System")]
+    public float hunterSneakDetectionMultiplier = 0.55f;
+    public bool playerIsSneaking = false;
+
+    [TextArea]
+    public string latestNightLog = "The night is still. No hunter has noticed you yet.";
+
     private ParkProgress state = new ParkProgress();
     private MourneveilParkUI ui;
     private float autosaveTimer;
@@ -180,6 +187,12 @@ public class MourneveilParkGame : MonoBehaviour
             return value * (1f + ScholarBonus);
         }
     }
+    public void AppendNightLog(string message)
+    {
+        latestNightLog = message;
+        Debug.Log("[Mourneveil Park] " + message);
+    }
+
 
     public int NetworkUpgradeCost
     {
