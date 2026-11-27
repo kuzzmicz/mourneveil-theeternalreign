@@ -132,6 +132,7 @@ GameObject:
   - component: {fileID: 400897000}
   - component: {fileID: 400897001}
   - component: {fileID: 400897002}
+  - component: {fileID: 400897003}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -362,6 +363,25 @@ MonoBehaviour:
   afterCatchCooldown: 6
   spawnGraceSeconds: 2.5
   showAwarenessIcon: 1
+--- !u!114 &400897003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 353ff0d4fc1ff72489689778972c34ae, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilCastleHub
+  parkGame: {fileID: 0}
+  castleBackground: {fileID: 6410620515845416610, guid: f522707e4e20f04418c93ea8d999b954, type: 3}
+  startInCastle: 1
+  toggleCastleKey: 104
+  hoverCloseDelay: 0.4
+  drawerSlideSpeed: 1400
+  keepProducingWhenUnfocused: 1
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
