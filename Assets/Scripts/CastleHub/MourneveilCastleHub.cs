@@ -99,7 +99,10 @@ public sealed class MourneveilCastleHub : MonoBehaviour
         }
         else if (inCastle && EscapeJustPressed())
         {
-            if (activeTab != Tab.None) CloseDrawer();
+            // When the Library is open, Esc returns to the hall, NOT the park.
+            MourneveilForgottenLibrary library = GetComponent<MourneveilForgottenLibrary>();
+            if (library != null && library.IsOpen) library.CloseLibrary();
+            else if (activeTab != Tab.None) CloseDrawer();
             else LeaveCastle(true);
         }
 
@@ -596,10 +599,24 @@ public sealed class MourneveilCastleHub : MonoBehaviour
         }
         else
         {
-            objectiveStage = 5;
-            objectiveTitle.text = "CHAPTER GOALS COMPLETE  /  HOUSE REBORN";
-            objectiveProgress.text = followers + " vampires  |  Supply Lv. " + s.supplyNetworkLevel;
-            objectiveNext.text = "All Castle v1.0 onboarding goals completed!";
+            // Castle v1.1: the House is restored; begin Library research goals.
+            int studied = 0;
+            if ((s.libraryResearchMask & 1) != 0) studied++;
+            if ((s.libraryResearchMask & 2) != 0) studied++;
+            if ((s.libraryResearchMask & 4) != 0) studied++;
+            objectiveStage = 5 + studied;
+            if (studied < 3)
+            {
+                objectiveTitle.text = "NEXT CHAPTER  /  THE FORGOTTEN LIBRARY";
+                objectiveProgress.text = "Complete forbidden research  (" + studied + "/3)";
+                objectiveNext.text = "Click LIBRARY in the hall; hover the grimoire to study.";
+            }
+            else
+            {
+                objectiveTitle.text = "CHAPTER COMPLETE  /  THE ARCHIVE AWAKENS";
+                objectiveProgress.text = "All 3 library discoveries researched!";
+                objectiveNext.text = "Your dynasty now bears the wisdom of the old house.";
+            }
         }
 
         // A milestone can also be finished in the park. RefreshData runs when

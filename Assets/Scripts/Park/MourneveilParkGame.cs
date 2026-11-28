@@ -46,6 +46,7 @@ public class ParkProgress
     public float soulIntegrity = 100f;
     public float suspicion = 0f;
     public int supplyNetworkLevel = 0;
+    public int libraryResearchMask = 0; // 1=Ledger, 2=Veil, 4=Vitae
     public int encountersResolved = 0;
     public ParkHuman currentHuman;
     // v0.4: persisted with the active encounter; old v1 saves default to false.
@@ -184,7 +185,8 @@ public class MourneveilParkGame : MonoBehaviour
             foreach (ParkFollower ally in FollowersSafe())
                 if (ally.role == ParkFollowerRole.Hunter)
                     value += Mathf.Max(0f, ally.bloodPerSecond);
-            return value * (1f + ScholarBonus);
+            return value * (1f + ScholarBonus) *
+                ((state.libraryResearchMask & 1) != 0 ? 1.15f : 1f);
         }
     }
     public void AppendNightLog(string message)
@@ -213,7 +215,8 @@ public class MourneveilParkGame : MonoBehaviour
             float research = Mathf.Min(12f, scholars * 2f);
             return Mathf.Clamp(82f - state.currentHuman.willpower * 0.65f +
                 (state.currentEncounterAmbush ? 8f : 0f) +
-                (state.currentEncounterMesmerized ? 6f : 0f) + research, 12f, 94f);
+                (state.currentEncounterMesmerized ? 6f : 0f) + research +
+                ((state.libraryResearchMask & 4) != 0 ? 8f : 0f), 12f, 94f);
         }
     }
 
@@ -239,7 +242,8 @@ public class MourneveilParkGame : MonoBehaviour
         if (production > 0f) state.blood += production * dt;
         if (state.currentHuman == null && state.suspicion > 0f)
             state.suspicion = Mathf.Max(0f, state.suspicion -
-                (naturalSuspicionDecreasePerSecond + SpySuspicionDecay) * dt);
+                (naturalSuspicionDecreasePerSecond + SpySuspicionDecay +
+                ((state.libraryResearchMask & 2) != 0 ? 0.15f : 0f)) * dt);
         layLowCooldownRemaining = Mathf.Max(0f, layLowCooldownRemaining - dt);
         autosaveTimer += dt;
         if (autosaveTimer >= 15f)
@@ -463,6 +467,23 @@ public class MourneveilParkGame : MonoBehaviour
         state.supplyNetworkLevel++;
         state.lastMessage = "Your contacts secure another quiet supply route. Passive Blood production increased.";
         CommitChange();
+    }
+
+    // Castle v1.1: one-time research purchases. Stored in the EXISTING save.
+    public bool BuyLibraryResearch(int researchBit)
+    {
+        int cost = researchBit == 1 ? 140 : researchBit == 2 ? 190 : researchBit == 4 ? 260 : -1;
+        if (cost < 0 || state.currentHuman != null || state.blood < cost ||
+            (state.libraryResearchMask & researchBit) != 0) return false;
+        int followers = state.followers == null ? 0 : state.followers.Count;
+        if (followers < 2 || state.supplyNetworkLevel < 3) return false;
+        state.blood -= cost;
+        state.libraryResearchMask |= researchBit;
+        string name = researchBit == 1 ? "Crimson Ledger" :
+                      researchBit == 2 ? "Veil of Silence" : "Forbidden Vitae";
+        state.lastMessage = "The Library remembers: " + name + " researched (-" + cost + " Blood).";
+        CommitChange();
+        return true;
     }
 
     public void LayLow()

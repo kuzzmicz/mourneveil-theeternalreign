@@ -135,6 +135,7 @@ GameObject:
   - component: {fileID: 400897003}
   - component: {fileID: 400897004}
   - component: {fileID: 400897005}
+  - component: {fileID: 400897006}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -425,6 +426,22 @@ MonoBehaviour:
   gentlyAnimateResidents: 1
   showHoverDescriptions: 1
   showNewArrivalNotice: 1
+--- !u!114 &400897006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b13999394b1a50d45b43f1c6b46b1992, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilForgottenLibrary
+  parkGame: {fileID: 400896998}
+  libraryBackground: {fileID: -308067434007546919, guid: 4fab8122e2739de46a2e98091fbaec3a, type: 3}
+  hoverCloseDelay: 0.55
+  slideSpeed: 1550
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
