@@ -134,6 +134,7 @@ GameObject:
   - component: {fileID: 400897002}
   - component: {fileID: 400897003}
   - component: {fileID: 400897004}
+  - component: {fileID: 400897005}
   m_Layer: 0
   m_Name: _ParkSystems
   m_TagString: Untagged
@@ -402,6 +403,28 @@ MonoBehaviour:
   showMilestoneNotices: 1
   appearanceTransitionSpeed: 2.5
   previewStageOverride: -1
+--- !u!114 &400897005
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 400896997}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aeac8906538836d41a3da9e6112032d7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MourneveilCastleResidents
+  parkGame: {fileID: 0}
+  appearanceSprites:
+  - {fileID: 21300000, guid: bc881fae06fd52d42ae83c1a34049b28, type: 3}
+  - {fileID: 21300000, guid: 9e65f0f0052a2d347932edb32aa488d4, type: 3}
+  - {fileID: 21300000, guid: 0ba6b498238f97a49995edcf90288681, type: 3}
+  maxVisibleResidents: 4
+  residentScale: 1
+  gentlyAnimateResidents: 1
+  showHoverDescriptions: 1
+  showNewArrivalNotice: 1
 --- !u!1 &449742616
 GameObject:
   m_ObjectHideFlags: 0
